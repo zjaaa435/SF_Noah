@@ -1,0 +1,54 @@
+.gradle
+.idea
+.jarlibs
+build/
+gradle/
+_modules/
+build.gradle
+gradle.properties
+settings.gradle
+gradlew
+gradlew.bat
+local.properties
+
+# --- SF_Noah repo hygiene (this workspace contains many unrelated large trees) ---
+# Keep the repo focused on the SF_Noah tool + its required assets only.
+dist/
+Release/
+_tmp_buglens_1224/
+sf_out_test*/
+BugLens-*.zip
+
+# Android / large source drops (not part of this tool repo)
+base/
+base_common/
+base_sys/
+interface/
+sdk/
+system_ext/
+build/
+
+# Large one-off log/bug folders (keep local only)
+10706580*
+
+# Local analysis reports / scratch files (not part of tool)
+Insets*_*分析报告_*对照.txt
+Oplus*_*分析报告_*对照.txt
+ObserverDeathRecipient_*分析报告_*对照.txt
+*.zip
+
+# Local helper folders not needed for SF_Noah source release
+_local_tools/
+noah_sf_tool/
+main.cs
+skill-creater.bat
+
+# Digital-human repo drop: not tracked in this repo (optional local dependency)
+数字人/
+
+# IDE / build artifacts
+**/bin/
+**/obj/
+*.user
+*.suo
+*.cache

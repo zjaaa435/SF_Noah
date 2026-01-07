@@ -1,0 +1,128 @@
+name: Release (win-x64)
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Build & Package (win-x64)
+        shell: pwsh
+        run: |
+          Set-ExecutionPolicy Bypass -Scope Process -Force
+          pwsh -NoProfile -ExecutionPolicy Bypass -File tools/publish_win_x64.ps1
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/SF_Noah-win-x64*.zip
+name: release-win-x64
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Publish win-x64 zip
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -ExecutionPolicy Bypass -File tools/publish_win_x64.ps1
+
+      - name: Find newest zip
+        id: z
+        shell: pwsh
+        run: |
+          $z = Get-ChildItem -Path dist -Filter "SF_Noah-win-x64*.zip" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $z) { throw "No zip produced under dist/" }
+          "zip=$($z.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "name=$($z.Name)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.z.outputs.zip }}
+          name: ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Publish (win-x64 single file)
+        shell: pwsh
+        run: |
+          $proj = "buglens_lite_cs/BugLensLite/BugLensLite.csproj"
+          dotnet restore $proj
+          dotnet publish $proj -c Release -r win-x64 `
+            -p:PublishSingleFile=true `
+            -p:SelfContained=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:DebugType=None -p:DebugSymbols=false
+
+      - name: Zip artifact
+        shell: pwsh
+        run: |
+          $outDir = "buglens_lite_cs/BugLensLite/bin/Release/net8.0-windows/win-x64/publish"
+          $zip = "SF_Noah-${{ github.ref_name }}-win-x64.zip"
+          if (Test-Path $zip) { Remove-Item $zip -Force }
+          Compress-Archive -Path "$outDir/*" -DestinationPath $zip
+          Write-Host "Created $zip"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            SF_Noah-${{ github.ref_name }}-win-x64.zip
+          generate_release_notes: true
+
+
+
+

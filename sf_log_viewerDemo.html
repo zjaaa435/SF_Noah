@@ -1,0 +1,2462 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SF 日志图层可视化（原型）</title>
+  <style>
+    :root{
+      --fg:#1f2328;
+      --bg:#ffffff;
+      --muted:#6a7380;
+      --border:#d0d7de;
+      --accent:#0969da;
+      --danger:#d1242f;
+      --success:#1a7f37;
+      --bg-elev:#f8fafc;
+      --shadow:0 1px 2px rgba(16,24,40,.06),0 1px 3px rgba(16,24,40,.10);
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    }
+    @media (prefers-color-scheme: dark){
+      :root{
+        --fg:#e6edf3;
+        --bg:#0d1117;
+        --muted:#8b949e;
+        --border:#30363d;
+        --accent:#4493f8;
+        --danger:#ff7b72;
+        --success:#3fb950;
+        --bg-elev:#0e1420;
+        --shadow:0 1px 2px rgba(0,0,0,.3),0 1px 4px rgba(0,0,0,.35);
+      }
+    }
+    html,body{
+      height:100%;
+      margin:0;
+      padding:0;
+      color:var(--fg);
+      background:var(--bg);
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Microsoft YaHei";
+    }
+    body.present{
+      background: #0b1220;
+    }
+    .container{
+      height:100%;
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+      box-sizing:border-box;
+      padding:8px;
+      max-width:none;
+      margin:0 auto;
+    }
+    body.present .container{
+      max-width: none;
+      padding: 0;
+      gap: 0;
+    }
+    .topbar{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      align-items:flex-end;
+      border:1px solid var(--border);
+      border-radius:12px;
+      padding:8px 10px;
+      background:linear-gradient(180deg, rgba(255,255,255,0.8), rgba(255,255,255,0.6)), var(--bg-elev);
+      box-shadow:var(--shadow);
+    }
+    body.present .topbar{
+      display:none;
+    }
+    .field{ min-width:200px; flex:1 1 200px; }
+    label{ display:block; font-size:12px; color:var(--muted); margin-bottom:4px; }
+    input[type="text"], select{
+      width:100%;
+      box-sizing:border-box;
+      border:1px solid var(--border);
+      background:var(--bg);
+      color:var(--fg);
+      padding:8px 10px;
+      border-radius:10px;
+      outline:none;
+    }
+    input[type="text"]:focus, select:focus{
+      border-color:var(--accent);
+      box-shadow:0 0 0 3px rgba(68,147,248,.25);
+    }
+    .actions{ display:flex; gap:8px; flex-wrap:wrap; }
+    button{
+      appearance:none;
+      border:1px solid var(--border);
+      background:var(--bg);
+      color:var(--fg);
+      padding:9px 12px;
+      border-radius:10px;
+      cursor:pointer;
+      box-shadow:var(--shadow);
+    }
+    button.primary{ background: linear-gradient(180deg, rgba(255,255,255,.12), rgba(255,255,255,0)), var(--accent); color:#fff; border-color:var(--accent); }
+    button.danger{ background: transparent; color: var(--danger); border-color: var(--danger); }
+    button[disabled]{ opacity:.6; cursor:not-allowed; box-shadow:none; }
+    .hint{ color:var(--muted); font-size:12px; }
+    .error{ color:var(--danger); font-size:13px; min-height:1.2em; }
+
+    .main{
+      flex:1;
+      min-height:0;
+      display:grid;
+      grid-template-columns: 360px 1fr 360px;
+      gap:12px;
+    }
+    body.present .main{
+      grid-template-columns: 1fr;
+      gap: 0;
+      height: 100vh;
+    }
+    @media (max-width: 1200px){
+      .main{
+        grid-template-columns: 1fr;
+        overflow:auto; /* stacked panels must be scrollable inside fixed-height container */
+      }
+    }
+    .panel{
+      border:1px solid var(--border);
+      border-radius:12px;
+      background:linear-gradient(180deg, rgba(255,255,255,0.8), rgba(255,255,255,0.6)), var(--bg-elev);
+      box-shadow:var(--shadow);
+      padding:12px;
+      min-height:0;
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+    }
+
+    /* Right panel: prevent "layer detail" from pushing the match list out of view */
+    #layerDetail{
+      max-height: 22vh;
+      overflow:auto;
+      padding-right: 4px; /* keep scrollbar from covering text */
+    }
+    @media (max-width: 1200px){
+      #layerDetail{ max-height: 34vh; }
+    }
+
+    #androidMatchList{
+      min-height: 180px; /* always leave room to show matches */
+    }
+    body.present .panel{
+      border:none;
+      border-radius:0;
+      background: transparent;
+      box-shadow:none;
+      padding: 0;
+    }
+    .panel h2{
+      margin:0;
+      font-size:14px;
+      font-weight:700;
+    }
+    .row{
+      display:grid;
+      grid-template-columns: 1fr 1fr;
+      gap:10px;
+    }
+    .mono{ font-family: var(--mono); }
+    .hidden{ display:none !important; }
+
+    .midGrid{
+      display:grid;
+      /* Right column is the "match" panel now — make it wider by default */
+      grid-template-columns: 1fr clamp(360px, 32vw, 520px);
+      gap: 10px;
+      min-height: 0;
+      flex: 1;
+      position: relative;
+    }
+    @media (max-width: 1100px){
+      .midGrid{ grid-template-columns: 1fr; }
+    }
+    body.present .midGrid{
+      grid-template-columns: 1fr;
+      gap: 0;
+    }
+    .videoWrap{
+      border:1px solid var(--border);
+      border-radius:12px;
+      overflow:hidden;
+      background: #0b1220;
+      box-shadow: var(--shadow);
+      min-height: 0;
+      display:flex;
+      flex-direction:column;
+    }
+    /* floating video window (draggable) */
+    #videoSection.floatingVideo{
+      position: fixed;
+      top: 14px;
+      right: 14px;
+      width: min(520px, 46vw);
+      max-width: calc(100vw - 28px);
+      max-height: min(62vh, 520px);
+      height: auto;
+      z-index: 60;
+      border-radius: 14px;
+      border-color: rgba(255,255,255,.14);
+      box-shadow: 0 12px 30px rgba(0,0,0,.28);
+    }
+    body.present #videoSection.floatingVideo{
+      z-index: 80;
+      border-color: rgba(255,255,255,.16);
+      box-shadow: 0 14px 36px rgba(0,0,0,.32);
+    }
+    .videoHead{
+      display:flex;
+      justify-content:space-between;
+      align-items:flex-start;
+      gap:10px;
+      padding:10px 12px;
+      color:#d8e0f0;
+      background: linear-gradient(180deg, rgba(11,18,32,.92), rgba(11,18,32,.65));
+      font-size:12px;
+      cursor: move; /* drag handle */
+      user-select: none;
+    }
+    .videoHead .meta{ opacity:.95; }
+    .videoHead .warn{ color: #ffd166; opacity:.95; text-align:right; }
+    video{
+      display:block;
+      background:#000;
+    }
+    .videoBody{
+      position:relative;
+      flex: 1;
+      min-height: 0;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding: 10px;
+    }
+    /* In floating mode, show the FULL video (fit in box) */
+    #videoSection.floatingVideo .videoBody{
+      padding: 0;
+      width: 100%;
+      overflow: hidden;
+      background: #000;
+    }
+    #videoSection.floatingVideo video{
+      width: 100%;
+      height: 100%;
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain; /* ALWAYS show full frame */
+    }
+    .videoPlaceholder{
+      color:#d8e0f0;
+      opacity:.85;
+      font-size:12px;
+      line-height:1.5;
+      text-align:center;
+      border:1px dashed rgba(216,224,240,.28);
+      border-radius:10px;
+      padding: 10px;
+      width: 100%;
+    }
+
+    .layerList{
+      flex:1;
+      min-height:0;
+      overflow:auto;
+      border:1px solid var(--border);
+      border-radius:10px;
+      background:var(--bg);
+    }
+    .layerItem{
+      padding:10px 10px;
+      border-bottom:1px solid rgba(208,215,222,.5);
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+      cursor:pointer;
+    }
+    .layerItem:hover{ outline:1px dashed rgba(68,147,248,.35); outline-offset:-1px; }
+    .layerItem.active{ border-left:3px solid var(--accent); background: rgba(68,147,248,.08); }
+    .layerTitle{
+      display:flex;
+      justify-content:space-between;
+      gap:8px;
+      align-items:baseline;
+    }
+    .layerName{
+      font-size:12px;
+      font-weight:650;
+      overflow:hidden;
+      white-space:nowrap;
+      text-overflow:ellipsis;
+    }
+    .badge{
+      font-size:11px;
+      padding:2px 8px;
+      border-radius:999px;
+      border:1px solid rgba(68,147,248,.35);
+      background: rgba(68,147,248,.12);
+      color: var(--fg);
+      white-space:nowrap;
+    }
+    .badges{ display:flex; flex-wrap:wrap; gap:6px; }
+    .badge.danger{ border-color: rgba(209,36,47,.5); background: rgba(209,36,47,.12); }
+    .badge.success{ border-color: rgba(26,127,55,.5); background: rgba(26,127,55,.12); }
+    .kv{
+      display:grid;
+      grid-template-columns: 120px 1fr;
+      gap:6px 10px;
+      font-size:12px;
+      color: var(--muted);
+    }
+    .kv div:nth-child(2n){ color: var(--fg); font-family: var(--mono); }
+
+    .view3dWrap{
+      flex:1;
+      min-height:0;
+      position:relative;
+      border:1px solid var(--border);
+      border-radius:12px;
+      overflow:hidden;
+      background: #0b1220;
+      user-select: none;
+      touch-action: none;
+    }
+    body.present .view3dWrap{
+      border:none;
+      border-radius:0;
+    }
+    .view3dOverlay{
+      position:absolute;
+      left:0; top:0; right:0;
+      padding:10px;
+      font-size:12px;
+      color:#d8e0f0;
+      background: linear-gradient(180deg, rgba(11,18,32,.88), rgba(11,18,32,.0));
+      pointer-events:none;
+      z-index:5;
+      display:flex;
+      justify-content:space-between;
+      gap:12px;
+      align-items:flex-start;
+    }
+    body.present .view3dOverlay{
+      background: linear-gradient(180deg, rgba(11,18,32,.62), rgba(11,18,32,.0));
+      padding: 14px 14px 50px;
+    }
+    .view3dOverlay .meta{ opacity:.95; }
+    .view3dOverlay .help{ opacity:.7; text-align:right; max-width:50%; }
+
+    .view3dControls{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      align-items:center;
+    }
+    .view3dControls .ctrl{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      font-size:12px;
+      color: var(--muted);
+    }
+    .view3dControls input[type="range"]{ width: 180px; }
+    .kbd{
+      font-family: var(--mono);
+      font-size: 11px;
+      color: #d8e0f0;
+      background: rgba(255,255,255,.08);
+      border: 1px solid rgba(255,255,255,.16);
+      border-radius: 6px;
+      padding: 1px 6px;
+      white-space: nowrap;
+    }
+
+    .stage{
+      position:absolute;
+      inset:0;
+      perspective: 900px;
+      perspective-origin: 50% 45%;
+      overflow:hidden;
+    }
+    .scene{
+      position:absolute;
+      left:50%;
+      top:52%;
+      transform-style: preserve-3d;
+      will-change: transform;
+    }
+    .gridPlane{
+      position:absolute;
+      left:0; top:0;
+      transform-style: preserve-3d;
+      background:
+        linear-gradient(rgba(124,201,255,.10) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(124,201,255,.10) 1px, transparent 1px);
+      background-size: 50px 50px;
+      opacity: .35;
+      border: 1px solid rgba(124,201,255,.25);
+      border-radius: 12px;
+      pointer-events:none;
+    }
+
+    .layerPlane{
+      position:absolute;
+      left:0; top:0;
+      transform-style: preserve-3d;
+      border-radius: 8px;
+      box-sizing: border-box;
+      border: 1px solid rgba(120,160,255,.55);
+      background: rgba(120,160,255,.09);
+      box-shadow: 0 6px 20px rgba(0,0,0,.25);
+      cursor: pointer;
+    }
+    body.present .layerPlane{
+      box-shadow: 0 10px 28px rgba(0,0,0,.22);
+      background: rgba(120,160,255,.07);
+    }
+    .layerPlane:hover{
+      border-color: rgba(124,201,255,.95);
+      background: rgba(124,201,255,.12);
+    }
+    .layerPlane.active{
+      border-color: rgba(255,209,102,.95);
+      background: rgba(255,209,102,.13);
+      outline: 2px solid rgba(255,209,102,.35);
+      outline-offset: 0;
+    }
+    .layerLabel{
+      position:absolute;
+      left:8px;
+      top:8px;
+      max-width: calc(100% - 16px);
+      font-family: var(--mono);
+      font-size: 11px;
+      color: rgba(216,224,240,.92);
+      background: rgba(0,0,0,.38);
+      border: 1px solid rgba(255,255,255,.14);
+      padding: 2px 6px;
+      border-radius: 999px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      pointer-events:none;
+    }
+
+    .timeline{
+      border:1px solid var(--border);
+      border-radius:12px;
+      background:linear-gradient(180deg, rgba(255,255,255,0.8), rgba(255,255,255,0.6)), var(--bg-elev);
+      box-shadow:var(--shadow);
+      padding:12px;
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+    }
+    body.present .timeline{
+      position: fixed;
+      left: 14px;
+      right: 14px;
+      bottom: 14px;
+      z-index: 40;
+      border-radius: 14px;
+      background: rgba(13,17,23,.55);
+      border-color: rgba(255,255,255,.14);
+      color: #d8e0f0;
+      backdrop-filter: blur(8px);
+    }
+    body.present .timeline .hint, body.present .timeline label, body.present .timeline .sep{ color: rgba(216,224,240,.82); }
+    body.present .timeline button{ box-shadow:none; border-color: rgba(255,255,255,.16); background: rgba(255,255,255,.06); color:#d8e0f0; }
+    body.present .timeline button.primary{ background: rgba(68,147,248,.45); border-color: rgba(68,147,248,.55); }
+    body.present .timeline select, body.present .timeline input[type="range"]{ filter: brightness(1.08); }
+
+    .presentBottom{
+      position:absolute;
+      left: 50%;
+      bottom: 92px; /* keep above timeline */
+      transform: translateX(-50%);
+      width: min(920px, 88vw);
+      z-index: 35;
+      pointer-events: none;
+    }
+    .presentLabels{
+      pointer-events: auto;
+      text-align: center;
+      color: rgba(216,224,240,.78);
+      font-size: 14px;
+      line-height: 1.6;
+      user-select: none;
+      max-height: 34vh;
+      overflow:auto;
+      padding: 10px 14px;
+      border-radius: 14px;
+      background: rgba(13,17,23,.35);
+      border: 1px solid rgba(255,255,255,.10);
+      backdrop-filter: blur(6px);
+    }
+    .presentLabelItem{
+      cursor: pointer;
+      padding: 2px 0;
+      font-family: var(--mono);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .presentLabelItem:hover{ color: rgba(216,224,240,.96); }
+    .presentLabelItem.active{ color: rgba(255,209,102,.98); }
+    .presentFooter{
+      margin-top: 8px;
+      text-align: right;
+      font-size: 12px;
+      color: rgba(216,224,240,.62);
+      pointer-events: none;
+      font-family: var(--mono);
+    }
+    .tlRow{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      flex-wrap:wrap;
+    }
+    input[type="range"]{ width: min(980px, 100%); }
+    .sep{ color:var(--muted); }
+    .miniBtn{ padding:7px 10px; border-radius:10px; font-size:12px; }
+
+    .checkRow{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      flex-wrap:wrap;
+      font-size:12px;
+      color: var(--muted);
+    }
+    .checkRow label{
+      display:flex;
+      align-items:center;
+      gap:6px;
+      margin:0;
+      font-size:12px;
+      color: var(--muted);
+    }
+    .checkRow input[type="text"], .checkRow select{
+      padding:6px 8px;
+      border-radius:10px;
+      font-size:12px;
+    }
+    .checkRow .miniInput{
+      width: 180px;
+      max-width: 44vw;
+    }
+    .checkRow .miniSelect{
+      width: 120px;
+    }
+    .logEventList{
+      /* Wrap to fit current UI width */
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+      border:1px solid var(--border);
+      border-radius:10px;
+      padding:10px;
+      background:var(--bg);
+      flex: 1;
+      min-height: 0;
+      overflow:auto;
+      font-family: var(--mono);
+      font-size:12px;
+      line-height:1.45;
+    }
+    .logEventItem{
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+    .logEventItem{ padding:6px 0; border-bottom: 1px dashed rgba(208,215,222,.55); }
+    .logEventItem:last-child{ border-bottom:none; }
+    .logEventItem .t{ color: var(--muted); }
+    .logEventItem .kind{ display:inline-block; margin-right:8px; padding:1px 8px; border-radius:999px; border:1px solid rgba(68,147,248,.35); background: rgba(68,147,248,.10); color: var(--fg); }
+    .logEventItem .kind.flags{ border-color: rgba(255,209,102,.45); background: rgba(255,209,102,.12); }
+    .logEventItem .kind.alpha{ border-color: rgba(63,185,80,.45); background: rgba(63,185,80,.10); }
+    .logEventItem .kind.alpha2{ border-color: rgba(163,113,247,.45); background: rgba(163,113,247,.10); }
+    .logEventItem .kind.reparent{ border-color: rgba(255,123,114,.45); background: rgba(255,123,114,.10); }
+    .logEventItem .kind.show{ border-color: rgba(68,147,248,.45); background: rgba(68,147,248,.10); }
+    .logEventItem .kind.hide{ border-color: rgba(106,115,128,.55); background: rgba(106,115,128,.12); }
+    .logEventItem .kind.release{ border-color: rgba(0,184,212,.55); background: rgba(0,184,212,.12); }
+
+    details.fold{
+      border:1px solid var(--border);
+      border-radius:12px;
+      background: var(--bg);
+      overflow:hidden;
+    }
+    details.fold > summary{
+      list-style:none;
+      cursor:pointer;
+      padding:10px 12px;
+      user-select:none;
+      font-size:12px;
+      color: var(--muted);
+      border-bottom:1px solid rgba(208,215,222,.55);
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+    }
+    details.fold > summary::-webkit-details-marker{ display:none; }
+    details.fold .body{
+      padding:10px 12px;
+    }
+    .rawBox{
+      white-space:pre-wrap;
+      border:1px solid var(--border);
+      border-radius:10px;
+      padding:10px;
+      background:var(--bg);
+      max-height: 22vh;
+      overflow:auto;
+      font-family: var(--mono);
+      font-size:12px;
+      line-height:1.45;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="topbar">
+      <div class="field" style="min-width:160px;flex:0 0 180px;">
+        <label for="groupWindow">多 Display 合帧窗口（ms）</label>
+        <input id="groupWindow" type="text" value="5" inputmode="numeric" />
+      </div>
+      <div class="field" style="min-width:160px;flex:0 0 220px;">
+        <label for="coordMode">画布坐标</label>
+        <select id="coordMode">
+          <option value="df" selected>df（Display Frame）</option>
+          <option value="sc">sc（Source Crop）</option>
+        </select>
+      </div>
+      <div class="actions" style="align-items:center;">
+        <button id="clearBtn" type="button" class="danger">清空</button>
+        <label class="hint" style="display:flex;align-items:center;gap:6px;margin-left:6px;">
+          <input id="presentMode" type="checkbox" />
+          演示模式
+        </label>
+      </div>
+      <div style="flex:1 1 auto;"></div>
+      <div id="stats" class="hint">待加载</div>
+      <div id="error" class="error" style="min-width:240px;"></div>
+    </div>
+
+    <div class="main">
+      <div class="panel" id="leftPanel">
+        <h2>图层栈（按 z 从大到小）</h2>
+        <div class="row">
+          <div>
+            <label for="displaySelect">Display</label>
+            <select id="displaySelect"></select>
+          </div>
+          <div>
+            <label for="layerFilter">过滤（名称/关键字）</label>
+            <input id="layerFilter" type="text" placeholder="例如：StatusBar / launcher / Task=" />
+          </div>
+        </div>
+        <div class="layerList" id="layerList" role="listbox" aria-label="layer list"></div>
+      </div>
+
+      <div class="panel" id="centerPanel">
+        <h2>画布预览</h2>
+        <div class="view3dControls">
+          <div class="ctrl">
+            <span>层间距</span>
+            <input id="depthRange" type="range" min="0" max="40" value="12" step="1" />
+            <span class="mono" id="depthValue">12</span>
+          </div>
+          <div class="ctrl">
+            <span>标签</span>
+            <select id="labelMode" style="width:140px;">
+              <option value="auto" selected>自动（选中/hover）</option>
+              <option value="all">全部</option>
+              <option value="none">不显示</option>
+            </select>
+          </div>
+          <button id="resetViewBtn" class="miniBtn" type="button">重置视角</button>
+          <button id="syncVideoBtn" class="miniBtn" type="button">对齐视频到当前帧</button>
+          <div class="ctrl">
+            <span>视频偏移(ms)</span>
+            <input id="videoOffsetMs" type="text" value="0" inputmode="numeric" style="width:110px;" />
+          </div>
+          <button id="calibrateBtn" class="miniBtn" type="button">用当前画面校准</button>
+        </div>
+        <div class="midGrid">
+          <div class="view3dWrap" id="view3d">
+            <div class="view3dOverlay">
+              <div class="meta" id="view3dOverlay">未加载</div>
+              <div class="help">
+                <div><span class="kbd">拖拽</span> 旋转</div>
+                <div><span class="kbd">滚轮</span> 缩放</div>
+                <div><span class="kbd">点击</span> 选中图层</div>
+              </div>
+            </div>
+            <div class="stage">
+              <div class="scene" id="scene"></div>
+            </div>
+            <div class="presentBottom">
+              <div id="presentLabels" class="presentLabels hidden"></div>
+              <div id="presentFooter" class="presentFooter"></div>
+            </div>
+          </div>
+          <div class="videoWrap" id="androidMatchSection">
+            <div class="videoHead">
+              <div class="meta">常规日志匹配</div>
+              <div class="warn" id="androidMatchMeta">未上传常规日志</div>
+            </div>
+            <div class="videoBody" style="display:flex;flex-direction:column;gap:10px;min-height:0;">
+              <div class="checkRow" style="pointer-events:auto;">
+                <label><input id="evtFlags" type="checkbox" checked /> setFlags</label>
+                <label><input id="evtAlpha" type="checkbox" checked /> setAlpha</label>
+                <label><input id="evtReparent" type="checkbox" checked /> reparent</label>
+                <label><input id="evtShow" type="checkbox" checked /> show</label>
+                <label><input id="evtHide" type="checkbox" checked /> hide</label>
+                <label><input id="evtRelease" type="checkbox" checked /> release</label>
+                <span class="sep">|</span>
+                <label style="gap:8px;">
+                  <span>上限</span>
+                  <select id="matchLimit" class="miniSelect" title="展示条数上限（过大可能变卡）">
+                    <option value="120" selected>120</option>
+                    <option value="500">500</option>
+                    <option value="2000">2000</option>
+                    <option value="all">全部</option>
+                  </select>
+                </label>
+                <input id="matchFilter" class="miniInput" type="text" placeholder="关键字过滤（raw contains）" />
+              </div>
+              <div id="androidMatchList" class="logEventList">-</div>
+            </div>
+          </div>
+        </div>
+        <div class="hint">三维模式：图层沿 Z 轴“爆炸分离”，更容易看清遮挡关系；左侧列表与三维图层可双向选中联动。</div>
+      </div>
+
+      <div class="panel" id="rightPanel">
+        <h2>选中图层详情</h2>
+        <div id="layerDetail" class="hint">未选中</div>
+        <details class="fold">
+          <summary>
+            <span>原始片段（可选）</span>
+            <span class="hint">点击展开</span>
+          </summary>
+          <div class="body">
+            <div class="rawBox" id="rawSnippet"></div>
+          </div>
+        </details>
+      </div>
+    </div>
+
+    <div class="timeline">
+      <div class="tlRow">
+        <button id="prevBtn" class="miniBtn" type="button">上一帧</button>
+        <button id="nextBtn" class="miniBtn" type="button">下一帧</button>
+        <span class="sep">|</span>
+        <button id="playBtn" class="miniBtn primary" type="button">播放</button>
+        <button id="stopBtn" class="miniBtn" type="button" disabled>停止</button>
+        <label class="sep" for="speedSelect">速度</label>
+        <select id="speedSelect" style="width:120px;">
+          <option value="1">1x</option>
+          <option value="2">2x</option>
+          <option value="4">4x</option>
+          <option value="8">8x</option>
+        </select>
+        <span class="sep">|</span>
+        <span class="hint" id="frameMeta">Frame: -/-</span>
+      </div>
+      <div class="tlRow">
+        <input id="frameRange" type="range" min="0" max="0" value="0" step="1" />
+        <span class="hint mono" id="frameTime">time: -</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Floating video window (draggable) -->
+  <div id="videoSection" class="videoWrap floatingVideo">
+    <div class="videoHead" id="videoHead">
+      <div class="meta" id="videoMeta">video: -</div>
+      <div class="warn" id="videoWarn"></div>
+    </div>
+    <div class="videoBody">
+      <div id="videoPlaceholder" class="videoPlaceholder">未上传录屏（或未对齐）。\n只展示图层信息。</div>
+      <video id="video" class="hidden" controls preload="metadata"></video>
+    </div>
+  </div>
+
+  <script>
+    // ---------- Parsing ----------
+    const START_RE = /dump current frame visible Layer start in Display (?<id>\d+)\s*\((?<desc>.*)\)\s*-+/;
+    const END_RE = /dump current frame visible Layer end/;
+    const TS_RE = /^(?<mm>\d{2})-(?<dd>\d{2})\s+(?<hh>\d{2}):(?<mi>\d{2}):(?<ss>\d{2})\.(?<frac>\d{1,6})/;
+    const PREFIX_RE = /^(?<ts>\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d{1,6})\s+\d+\s+\d+\s+\w\s+/;
+
+    function parseTimeToMillis(tsStr) {
+      const m = tsStr.match(TS_RE);
+      if (!m || !m.groups) return null;
+      const mm = Number(m.groups.mm), dd = Number(m.groups.dd);
+      const hh = Number(m.groups.hh), mi = Number(m.groups.mi), ss = Number(m.groups.ss);
+      const frac = m.groups.frac.padEnd(3, '0').slice(0, 3);
+      const ms = Number(frac);
+      if ([mm,dd,hh,mi,ss,ms].some(n => Number.isNaN(n))) return null;
+      // relative millis: month+day+time, enough for ordering inside a file
+      return (((mm*31 + dd) * 24 + hh) * 60 + mi) * 60 * 1000 + (ss * 1000) + ms;
+    }
+
+    function parseVideoStartFromFilename(filename){
+      const name = String(filename || '').trim();
+      const m = name.match(/^(?<y>\d{4})-(?<mo>\d{2})-(?<d>\d{2})-(?<hh>\d{2})-(?<mi>\d{2})-(?<ss>\d{2})\.mp4$/i);
+      if (!m || !m.groups) return null;
+      const y = Number(m.groups.y);
+      const mo = Number(m.groups.mo);
+      const d = Number(m.groups.d);
+      const hh = Number(m.groups.hh);
+      const mi = Number(m.groups.mi);
+      const ss = Number(m.groups.ss);
+      if ([y,mo,d,hh,mi,ss].some(n => Number.isNaN(n))) return null;
+      const dt = new Date(y, mo - 1, d, hh, mi, ss, 0); // local time
+      return Number.isNaN(dt.getTime()) ? null : dt.getTime();
+    }
+
+    function parseLogTsToEpoch(tsStr, yearHint){
+      // tsStr like "11-26 14:29:32.555"
+      const s = String(tsStr || '').trim();
+      const m = s.match(/^(?<mo>\d{2})-(?<d>\d{2})\s+(?<hh>\d{2}):(?<mi>\d{2}):(?<ss>\d{2})\.(?<frac>\d{1,6})$/);
+      if (!m || !m.groups) return null;
+      const y = Number(yearHint);
+      const mo = Number(m.groups.mo);
+      const d = Number(m.groups.d);
+      const hh = Number(m.groups.hh);
+      const mi = Number(m.groups.mi);
+      const ss = Number(m.groups.ss);
+      const ms = Number(m.groups.frac.padEnd(3, '0').slice(0, 3));
+      if ([y,mo,d,hh,mi,ss,ms].some(n => Number.isNaN(n))) return null;
+      const dt = new Date(y, mo - 1, d, hh, mi, ss, ms);
+      return Number.isNaN(dt.getTime()) ? null : dt.getTime();
+    }
+
+    function stripPrefix(line) {
+      const m = line.match(PREFIX_RE);
+      if (!m || !m.groups) return { ts: null, text: line };
+      const ts = m.groups.ts;
+      const text = line.slice(m[0].length);
+      return { ts, text };
+    }
+
+    function parseRect(text) {
+      const s = String(text || '').trim();
+      if (!s) return null;
+
+      // Accept ints/floats, spaces/commas, and both formats:
+      // - [l t r b]  / [l,t,r,b]
+      // - [l t][r b] / [l,t][r,b]
+      const num = '-?\\d+(?:\\.\\d+)?';
+      const sep = '\\s*,?\\s*';
+
+      // [l t][r b]
+      let m = s.match(new RegExp(`\\[(?<l>${num})${sep}(?<t>${num})\\]\\s*\\[(?<r>${num})${sep}(?<b>${num})\\]`));
+      if (m && m.groups) {
+        return { l: Number(m.groups.l), t: Number(m.groups.t), r: Number(m.groups.r), b: Number(m.groups.b) };
+      }
+
+      // [l t r b]
+      m = s.match(new RegExp(`\\[(?<l>${num})${sep}(?<t>${num})${sep}(?<r>${num})${sep}(?<b>${num})\\]`));
+      if (m && m.groups) {
+        return { l: Number(m.groups.l), t: Number(m.groups.t), r: Number(m.groups.r), b: Number(m.groups.b) };
+      }
+
+      return null;
+    }
+
+    function parseLayerProps(text) {
+      // Example:
+      // seq=1159 useq=2147668992 sfCmp=CLIENT(BLUR) hwcCmp=CLIENT alpha=1.000000 ... tr=0 z=0 [ ] sc=[..] df=[..] sdr=... dim=... fr=... buf=... changes=...
+      const out = {};
+      const parts = text.split(/\s+/).filter(Boolean);
+      for (const p of parts) {
+        const idx = p.indexOf('=');
+        if (idx === -1) continue;
+        const k = p.slice(0, idx);
+        const v = p.slice(idx + 1);
+        out[k] = v;
+      }
+      // sc/df/bounds may appear as:
+      // - sc=[l t r b]
+      // - sc=[l t][r b]
+      // Same for df/bounds. Capture the whole bracket expression (1 or 2 bracket groups).
+      const cap = (key) => {
+        const m = text.match(new RegExp(`\\b${key}=(\\[[^\\]]+\\](?:\\[[^\\]]+\\])?)`));
+        return m ? m[1] : null;
+      };
+
+      const sc = cap('sc');
+      const df = cap('df');
+      const bounds = cap('bounds');
+      if (sc) out.sc = sc;
+      // fallback: if df missing, try bounds
+      if (df) out.df = df;
+      else if (bounds) out.df = bounds;
+      return out;
+    }
+
+    function parseSegmentsFromText(text) {
+      const lines = text.split(/\r?\n/);
+      const segments = [];
+
+      let curSeg = null;
+      let pendingLayerName = null;
+      let pendingLayerLine = null;
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        if (!line) continue;
+        const { ts, text: body } = stripPrefix(line);
+
+        const s = line.match(START_RE);
+        if (s && s.groups) {
+          // finalize previous if any (defensive)
+          if (curSeg) segments.push(curSeg);
+          curSeg = {
+            startLine: i,
+            timeStr: ts || null,
+            timeMs: ts ? parseTimeToMillis(ts) : null,
+            displayId: s.groups.id,
+            displayDesc: s.groups.desc,
+            layers: []
+          };
+          pendingLayerName = null;
+          pendingLayerLine = null;
+          continue;
+        }
+        if (!curSeg) continue;
+
+        if (END_RE.test(line)) {
+          curSeg.endLine = i;
+          segments.push(curSeg);
+          curSeg = null;
+          pendingLayerName = null;
+          pendingLayerLine = null;
+          continue;
+        }
+
+        // Inside segment:
+        // layer name line: "Wallpaper BBQ wrapper#1159"
+        // prop line: "seq=... useq=... ... sc=[...] df=[...] ..."
+        if (body.startsWith('seq=')) {
+          if (!pendingLayerName) {
+            // best effort: unnamed layer
+            pendingLayerName = '(unknown)';
+          }
+          const props = parseLayerProps(body);
+          const layer = {
+            name: pendingLayerName,
+            rawNameLine: pendingLayerLine || '',
+            rawPropLine: line,
+            props,
+            z: Number(props.z ?? 0),
+            seq: props.seq || null,
+            useq: props.useq || null,
+            sfCmp: props.sfCmp || null,
+            hwcCmp: props.hwcCmp || null,
+            alpha: props.alpha || null,
+            tr: props.tr || null,
+            isOpaque: props.isOpaque || null,
+            ignoreSecure: props.ignoreSecure || null,
+            isOplusSecure: props.isOplusSecure || null,
+            changes: props.changes || null,
+            scRect: props.sc ? parseRect(props.sc) : null,
+            dfRect: props.df ? parseRect(props.df) : null
+          };
+          curSeg.layers.push(layer);
+          pendingLayerName = null;
+          pendingLayerLine = null;
+          continue;
+        }
+
+        // treat as layer name line (exclude obvious noise)
+        if (body.includes('dump current frame')) continue;
+        pendingLayerName = body.trim();
+        pendingLayerLine = line;
+      }
+
+      // If file ends without END marker, keep best-effort
+      if (curSeg) segments.push(curSeg);
+      return segments;
+    }
+
+    function groupSegmentsToFrames(segments, windowMs) {
+      const frames = [];
+      let cur = null;
+      let lastTime = null;
+      const w = Number.isFinite(windowMs) ? windowMs : 5;
+      for (const seg of segments) {
+        const t = seg.timeMs ?? (lastTime ?? 0);
+        const shouldNew = (!cur) || (lastTime == null) || (t - lastTime > w) || (t < lastTime);
+        if (shouldNew) {
+          cur = { timeStr: seg.timeStr || '', timeMs: seg.timeMs ?? null, displays: new Map() };
+          frames.push(cur);
+        }
+        cur.displays.set(seg.displayId, seg);
+        lastTime = t;
+      }
+      // normalize displays to array for UI
+      return frames.map(f => ({
+        timeStr: f.timeStr,
+        timeMs: f.timeMs,
+        displays: Array.from(f.displays.entries()).map(([id, seg]) => ({ id, seg }))
+      }));
+    }
+
+    // ---------- UI State ----------
+    let state = {
+      text: '',
+      segments: [],
+      frames: [],
+      frameIdx: 0,
+      displayId: null,
+      selectedLayerKey: null,
+      selectedLayerRef: null,
+      hoveredLayerKey: null,
+      android: {
+        file: null,
+        text: '',
+        parsed: false,
+        eventCount: 0,
+        index: new Map(), // key: layerId string -> { flags:[], alpha:[], reparent:[], show:[], hide:[], release:[] }
+      },
+      video: {
+        file: null,
+        url: null,
+        startEpochMs: null,
+        durationSec: null,
+        aligned: false,
+        offsetMs: 0,
+        ignoreMismatchUntil: 0,
+        mismatchStreak: 0,
+      },
+      playing: false,
+      playTimer: null,
+    };
+
+    // ---------- Helpers ----------
+    function $(id){ return document.getElementById(id); }
+    function setError(msg){ $('error').textContent = msg || ''; }
+    function setStats(msg){ $('stats').textContent = msg || ''; }
+    function clamp(n, a, b){ return Math.max(a, Math.min(b, n)); }
+    function safeLower(s){ return String(s || '').toLowerCase(); }
+    function layerKey(layer){
+      // best effort stable key inside a frame: prefer seq, then useq, then name
+      return `${layer.seq || ''}|${layer.useq || ''}|${layer.name || ''}`;
+    }
+
+    function currentFrame(){
+      return state.frames[state.frameIdx] || null;
+    }
+    function currentDisplaySegment(){
+      const f = currentFrame();
+      if (!f) return null;
+      const found = f.displays.find(d => d.id === state.displayId);
+      return found ? found.seg : (f.displays[0]?.seg || null);
+    }
+
+    function getSelectedLayerSeqStr(){
+      const seg = currentDisplaySegment();
+      if (!seg || !seg.layers || !seg.layers.length) return null;
+      let layer = null;
+      if (state.selectedLayerRef && seg.layers.includes(state.selectedLayerRef)) {
+        layer = state.selectedLayerRef;
+      } else if (state.selectedLayerKey) {
+        layer = seg.layers.find(l => layerKey(l) === state.selectedLayerKey) || null;
+      }
+      const seq = layer?.seq;
+      const s = seq == null ? '' : String(seq).trim();
+      return s ? s : null;
+    }
+
+    // ---------- Android log parsing (index by layerId/sequence) ----------
+    const ANDROID_TS_RE = /^(?<ts>\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d{1,6})\s+\d+\s+\d+\s+\w\s+/;
+    const ANDR_SETFLAGS_RE = /\bOplusRequestedLayerState:\s*setFlags\b/i;
+    const ANDR_SETALPHA_OPLUS_RE = /\bOplusRequestedLayerState:\s*setAlpha\b/i;
+    const ANDR_SETALPHA_SC_RE = /\bSurfaceControl:\s*setAlpha\b/i;
+    const ANDR_REPARENT_OPLUS_RE = /\bOplusRequestedLayerState:\s*reparent\b/i;
+    const ANDR_REPARENT_SC_RE = /\bSurfaceControl:\s*Transaction\s+reparent\b/i;
+    // show/hide variants seen in the wild:
+    // - "SurfaceControl: SurfaceControl show : ..."
+    // - "SurfaceControl: SurfaceControl hide: ..."
+    // - "SurfaceControl: Transaction show/hide ..."
+    // - "SurfaceControl: show/hide ..."
+    const ANDR_SHOW_SC_RE = /\bSurfaceControl:\s*(?:(?:SurfaceControl|Transaction)\s+)?show\b/i;
+    const ANDR_HIDE_SC_RE = /\bSurfaceControl:\s*(?:(?:SurfaceControl|Transaction)\s+)?hide\b/i;
+    const ANDR_RELEASE_SC_RE = /\bSurfaceControl:\s*SurfaceControl\s+release\b/i;
+    const ANDR_SEQUENCE_RE = /\bsequence\s*=\s*(?<id>\d+)\b/i;
+    const ANDR_LAYERID_RE = /\blayerId\s*=\s*(?<id>\d+)\b/i;
+    const ANDR_ALPHA_RE = /\balpha\s*=\s*(?<a>-?\d+(?:\.\d+)?)\b/i;
+    const ANDR_PARENT_LAYERID_RE = /\bparentLayerId\s*=\s*(?<id>\d+)\b/i;
+    const ANDR_HASH_ID_ANY_RE = /#(?<id>\d+)\b/g;
+
+    function extractLastHashId(line){
+      const s = String(line || '');
+      let last = null;
+      try {
+        for (const m of s.matchAll(ANDR_HASH_ID_ANY_RE)) {
+          if (m?.groups?.id) last = m.groups.id;
+        }
+      } catch (_) {}
+      return last;
+    }
+
+    function addAndroidEvent(layerIdStr, kind, ev){
+      const id = String(layerIdStr || '').trim();
+      if (!id) return;
+      if (!state.android.index) state.android.index = new Map();
+      if (!state.android.index.has(id)) state.android.index.set(id, { flags: [], alpha: [], reparent: [], show: [], hide: [], release: [] });
+      const bucket = state.android.index.get(id);
+      if (kind === 'flags') bucket.flags.push(ev);
+      else if (kind === 'alpha') bucket.alpha.push(ev);
+      else if (kind === 'reparent') bucket.reparent.push(ev);
+      else if (kind === 'show') bucket.show.push(ev);
+      else if (kind === 'hide') bucket.hide.push(ev);
+      else if (kind === 'release') bucket.release.push(ev);
+      state.android.eventCount = (state.android.eventCount || 0) + 1;
+    }
+
+    function parseAndroidLine(line, lineNo){
+      const raw = String(line || '');
+      if (!raw) return null;
+      const mTs = raw.match(ANDROID_TS_RE);
+      const ts = mTs?.groups?.ts || null;
+
+      if (ANDR_SETFLAGS_RE.test(raw)) {
+        const mId = raw.match(ANDR_SEQUENCE_RE);
+        const id = mId?.groups?.id || null;
+        if (!id) return null;
+        const flags = raw.match(/\bflags\[(?<v>0x[0-9a-fA-F]+)\]/)?.groups?.v || null;
+        const mask = raw.match(/\bmask\[(?<v>0x[0-9a-fA-F]+)\]/)?.groups?.v || null;
+        const newFlags = raw.match(/\bnewFlags\[(?<v>0x[0-9a-fA-F]+)\]/)?.groups?.v || null;
+        const name = raw.match(/\bname=(?<v>.+)$/)?.groups?.v || null;
+        return { kind: 'flags', id, ts, lineNo: Number(lineNo ?? -1), flags, mask, newFlags, name, raw };
+      }
+
+      if (ANDR_SETALPHA_OPLUS_RE.test(raw)) {
+        const mId = raw.match(ANDR_SEQUENCE_RE);
+        const id = mId?.groups?.id || null;
+        if (!id) return null;
+        const alpha = raw.match(/\balpha=(?<v>-?\d+(?:\.\d+)?)\b/)?.groups?.v || null;
+        const newAlpha = raw.match(/\bnewAlpha=(?<v>-?\d+(?:\.\d+)?)\b/)?.groups?.v || null;
+        const name = raw.match(/\bname=(?<v>.+)$/)?.groups?.v || null;
+        return { kind: 'alpha', subtype: 'oplus', id, ts, lineNo: Number(lineNo ?? -1), alpha, newAlpha, name, raw };
+      }
+
+      if (ANDR_SETALPHA_SC_RE.test(raw)) {
+        const mId = raw.match(ANDR_LAYERID_RE);
+        const id = mId?.groups?.id || null;
+        if (!id) return null;
+        const alpha = raw.match(ANDR_ALPHA_RE)?.groups?.a || null;
+        return { kind: 'alpha', subtype: 'surfacecontrol', id, ts, lineNo: Number(lineNo ?? -1), alpha, raw };
+      }
+
+      // reparent (OplusRequestedLayerState): layerId is trailing "#<digits>" at end of name
+      if (ANDR_REPARENT_OPLUS_RE.test(raw)) {
+        const id = extractLastHashId(raw);
+        if (!id) return null;
+        const to = raw.match(/\breparent\s+to\s+(?<v>[^,]+)\b/i)?.groups?.v || null;
+        const oldParent = raw.match(/\boldParent\s*=\s*(?<v>[^,]+)\b/i)?.groups?.v || null;
+        const name = raw.match(/\bname=(?<v>.+)$/)?.groups?.v || null;
+        return { kind: 'reparent', subtype: 'oplus', id, ts, lineNo: Number(lineNo ?? -1), to, oldParent, name, raw };
+      }
+
+      // reparent (SurfaceControl Transaction): match by "layerId=<child>"
+      if (ANDR_REPARENT_SC_RE.test(raw)) {
+        const mId = raw.match(ANDR_LAYERID_RE);
+        const id = mId?.groups?.id || null;
+        if (!id) return null;
+        const parentLayerId = raw.match(ANDR_PARENT_LAYERID_RE)?.groups?.id || null;
+        return { kind: 'reparent', subtype: 'surfacecontrol', id, ts, lineNo: Number(lineNo ?? -1), parentLayerId, raw };
+      }
+
+      // show/hide (SurfaceControl): match by "layerId=<id>"
+      if (ANDR_SHOW_SC_RE.test(raw)) {
+        const mId = raw.match(ANDR_LAYERID_RE);
+        const id = mId?.groups?.id || null;
+        if (!id) return null;
+        return { kind: 'show', subtype: 'surfacecontrol', id, ts, lineNo: Number(lineNo ?? -1), raw };
+      }
+      if (ANDR_HIDE_SC_RE.test(raw)) {
+        const mId = raw.match(ANDR_LAYERID_RE);
+        const id = mId?.groups?.id || null;
+        if (!id) return null;
+        return { kind: 'hide', subtype: 'surfacecontrol', id, ts, lineNo: Number(lineNo ?? -1), raw };
+      }
+
+      // release (SurfaceControl): match by "layerId=<id>"
+      if (ANDR_RELEASE_SC_RE.test(raw)) {
+        const mId = raw.match(ANDR_LAYERID_RE);
+        const id = mId?.groups?.id || null;
+        if (!id) return null;
+        return { kind: 'release', subtype: 'surfacecontrol', id, ts, lineNo: Number(lineNo ?? -1), raw };
+      }
+
+      return null;
+    }
+
+    async function indexAndroidLogText(text){
+      state.android.text = text || '';
+      state.android.index = new Map();
+      state.android.eventCount = 0;
+      state.android.parsed = false;
+      const lines = String(state.android.text || '').split(/\r?\n/);
+      // chunked parse to keep UI responsive on big logs
+      const chunk = 20000;
+      for (let i = 0; i < lines.length; i++) {
+        const ev = parseAndroidLine(lines[i], i);
+        if (ev) addAndroidEvent(ev.id, ev.kind, ev);
+        if (i > 0 && (i % chunk === 0)) {
+          $('androidMatchMeta').textContent = `解析常规日志中… ${i}/${lines.length} 行`;
+          await new Promise(r => setTimeout(r, 0));
+        }
+      }
+      state.android.parsed = true;
+      $('androidMatchMeta').textContent = `常规日志已加载：events=${state.android.eventCount}，ids=${state.android.index.size}`;
+      renderAndroidMatch();
+    }
+
+    function renderAndroidMatch(){
+      const list = $('androidMatchList');
+      const meta = $('androidMatchMeta');
+      if (!list || !meta) return;
+
+      const id = getSelectedLayerSeqStr();
+      if (!state.android || !state.android.text) {
+        meta.textContent = '未上传常规日志';
+        list.textContent = '-';
+        return;
+      }
+      if (!state.android.parsed) {
+        meta.textContent = '常规日志解析中…';
+        list.textContent = '-';
+        return;
+      }
+      if (!id) {
+        meta.textContent = `常规日志已加载：events=${state.android.eventCount}，ids=${state.android.index.size}（未选中或该图层无 seq）`;
+        list.textContent = '-';
+        return;
+      }
+
+      const bucket = state.android.index.get(id) || null;
+      const wantFlags = !!$('evtFlags')?.checked;
+      const wantAlpha = !!$('evtAlpha')?.checked;
+      const wantReparent = !!$('evtReparent')?.checked;
+      const wantShow = !!$('evtShow')?.checked;
+      const wantHide = !!$('evtHide')?.checked;
+      const wantRelease = !!$('evtRelease')?.checked;
+      const flags = (wantFlags && bucket) ? (bucket.flags || []) : [];
+      const alpha = (wantAlpha && bucket) ? (bucket.alpha || []) : [];
+      const reparent = (wantReparent && bucket) ? (bucket.reparent || []) : [];
+      const show = (wantShow && bucket) ? (bucket.show || []) : [];
+      const hide = (wantHide && bucket) ? (bucket.hide || []) : [];
+      const release = (wantRelease && bucket) ? (bucket.release || []) : [];
+      const totalAll = (flags.length + alpha.length + reparent.length + show.length + hide.length + release.length);
+
+      const filterText = safeLower($('matchFilter')?.value || '');
+
+      if (!totalAll) {
+        list.textContent = '(无匹配日志)';
+        meta.textContent = `layerId=${id} 匹配：0 条`;
+        return;
+      }
+
+      // merge by appearance order (lineNo)
+      const merged = [
+        ...flags.map(e => ({...e, _kind:'flags'})),
+        ...alpha.map(e => ({...e, _kind:'alpha'})),
+        ...reparent.map(e => ({...e, _kind:'reparent'})),
+        ...show.map(e => ({...e, _kind:'show'})),
+        ...hide.map(e => ({...e, _kind:'hide'})),
+        ...release.map(e => ({...e, _kind:'release'})),
+      ]
+        .sort((a,b) => (Number(a.lineNo ?? 0) - Number(b.lineNo ?? 0)));
+
+      const filtered = filterText ? merged.filter(e => safeLower(e.raw).includes(filterText)) : merged;
+      const total = filtered.length;
+      meta.textContent =
+        `layerId=${id} 匹配：${total} 条` +
+        (filterText ? `（过滤="${filterText}"）` : '') +
+        `（flags=${flags.length}，alpha=${alpha.length}，reparent=${reparent.length}，show=${show.length}，hide=${hide.length}，release=${release.length}）`;
+
+      const limitSel = String($('matchLimit')?.value || '120');
+      const limit =
+        limitSel === 'all' ? Number.POSITIVE_INFINITY :
+        (Number(limitSel) > 0 ? Number(limitSel) : 120);
+      const hardCap = 5000; // prevent DOM blow-up
+      const effectiveLimit = Math.min(limit, hardCap);
+      const shown = filtered.slice(0, effectiveLimit);
+      list.innerHTML = '';
+      const frag = document.createDocumentFragment();
+      for (const ev of shown) {
+        const div = document.createElement('div');
+        div.className = 'logEventItem';
+        const kindSpan = document.createElement('span');
+        if (ev._kind === 'flags') {
+          kindSpan.className = 'kind flags';
+          kindSpan.textContent = 'setFlags';
+        } else if (ev._kind === 'alpha') {
+          kindSpan.className = 'kind ' + (ev.subtype === 'surfacecontrol' ? 'alpha2' : 'alpha');
+          kindSpan.textContent = 'setAlpha';
+        } else if (ev._kind === 'reparent') {
+          kindSpan.className = 'kind reparent';
+          kindSpan.textContent = 'reparent';
+        } else if (ev._kind === 'show') {
+          kindSpan.className = 'kind show';
+          kindSpan.textContent = 'show';
+        } else if (ev._kind === 'hide') {
+          kindSpan.className = 'kind hide';
+          kindSpan.textContent = 'hide';
+        } else {
+          kindSpan.className = 'kind release';
+          kindSpan.textContent = 'release';
+        }
+        const t = document.createElement('span');
+        t.className = 't';
+        t.textContent = ev.ts ? `${ev.ts} ` : '';
+        const body = document.createElement('span');
+        body.textContent = ev.raw || '';
+        div.appendChild(kindSpan);
+        div.appendChild(t);
+        div.appendChild(body);
+        frag.appendChild(div);
+      }
+      if (filtered.length > effectiveLimit) {
+        const tail = document.createElement('div');
+        tail.className = 'logEventItem';
+        const note = (limitSel === 'all' && hardCap === effectiveLimit)
+          ? `已到安全上限 ${hardCap}（避免卡死）；建议再用关键字过滤缩小范围`
+          : `仅展示前 ${effectiveLimit} 条`;
+        tail.innerHTML = `<span class="t">${note}，共 ${filtered.length} 条</span>`;
+        frag.appendChild(tail);
+      }
+      list.appendChild(frag);
+    }
+
+    // ---------- Rendering ----------
+    function renderDisplaySelect(){
+      const sel = $('displaySelect');
+      sel.innerHTML = '';
+      const f = currentFrame();
+      if (!f || !f.displays.length){
+        const opt = document.createElement('option');
+        opt.value = '';
+        opt.textContent = '(无)';
+        sel.appendChild(opt);
+        sel.disabled = true;
+        state.displayId = null;
+        return;
+      }
+      sel.disabled = false;
+      for (const d of f.displays) {
+        const opt = document.createElement('option');
+        opt.value = d.id;
+        opt.textContent = `${d.id} - ${d.seg.displayDesc}`;
+        sel.appendChild(opt);
+      }
+      if (!state.displayId || !f.displays.some(d => d.id === state.displayId)) {
+        state.displayId = f.displays[0].id;
+      }
+      sel.value = state.displayId;
+    }
+
+    function renderLayerList(){
+      const list = $('layerList');
+      list.innerHTML = '';
+      const seg = currentDisplaySegment();
+      if (!seg) return;
+
+      const filter = safeLower($('layerFilter').value || '');
+      const layers = [...(seg.layers || [])]
+        .filter(l => !filter || safeLower(l.name).includes(filter) || safeLower(l.sfCmp).includes(filter) || safeLower(l.hwcCmp).includes(filter))
+        .sort((a,b) => (Number(b.z) - Number(a.z)) || String(a.name).localeCompare(String(b.name)));
+
+      const frag = document.createDocumentFragment();
+      for (const layer of layers) {
+        const key = layerKey(layer);
+        const item = document.createElement('div');
+        item.className = 'layerItem' + (state.selectedLayerKey === key ? ' active' : '');
+        item.setAttribute('role', 'option');
+        item.setAttribute('data-key', key);
+
+        const title = document.createElement('div');
+        title.className = 'layerTitle';
+        const name = document.createElement('div');
+        name.className = 'layerName mono';
+        name.textContent = layer.name || '(unnamed)';
+        const z = document.createElement('span');
+        z.className = 'badge';
+        z.textContent = `z=${layer.z}`;
+        title.appendChild(name);
+        title.appendChild(z);
+
+        const badges = document.createElement('div');
+        badges.className = 'badges';
+        if (layer.sfCmp) badges.appendChild(makeBadge(`sf=${layer.sfCmp}`, false));
+        if (layer.hwcCmp) badges.appendChild(makeBadge(`hwc=${layer.hwcCmp}`, false));
+        if (layer.alpha) badges.appendChild(makeBadge(`α=${layer.alpha}`, false));
+        if (layer.isOplusSecure === 'true' || layer.ignoreSecure === 'true') badges.appendChild(makeBadge('secure', true));
+        if (layer.isOpaque === 'true') badges.appendChild(makeBadge('opaque', 'success'));
+
+        const mini = document.createElement('div');
+        mini.className = 'hint mono';
+        const rect = ($('coordMode').value === 'sc' ? layer.scRect : layer.dfRect);
+        if (rect) mini.textContent = `${$('coordMode').value}=[${rect.l} ${rect.t} ${rect.r} ${rect.b}]`;
+        else mini.textContent = '(无矩形)';
+
+        item.appendChild(title);
+        if (badges.childNodes.length) item.appendChild(badges);
+        item.appendChild(mini);
+
+        item.addEventListener('mouseenter', () => { state.hoveredLayerKey = key; render3D(); });
+        item.addEventListener('mouseleave', () => { state.hoveredLayerKey = null; render3D(); });
+        item.addEventListener('click', () => {
+          state.selectedLayerKey = key;
+          state.selectedLayerRef = layer;
+          renderLayerDetail();
+          renderLayerList();
+          render3D();
+        });
+
+        frag.appendChild(item);
+      }
+      list.appendChild(frag);
+    }
+
+    function makeBadge(text, kind){
+      const b = document.createElement('span');
+      b.className = 'badge';
+      if (kind === true || kind === 'danger') b.classList.add('danger');
+      if (kind === 'success') b.classList.add('success');
+      b.textContent = text;
+      return b;
+    }
+
+    function parseLayerAppInfo(name){
+      const out = { packageName: null, component: null, taskId: null, surfaceName: null };
+      const s = String(name || '').trim();
+      if (!s) return out;
+
+      // common: "com.xxx/.MainActivity#123" or "com.xxx/com.xxx.MainActivity#123"
+      const mComp = s.match(/^(?<pkg>[A-Za-z0-9_.]+)\/(?<cls>[A-Za-z0-9_.$]+)(?:#(?<id>\d+))?$/);
+      if (mComp?.groups) {
+        out.packageName = mComp.groups.pkg;
+        out.component = `${mComp.groups.pkg}/${mComp.groups.cls}`;
+        return out;
+      }
+
+      // "StatusBar#99" / "Taskbar#31454"
+      const mSimple = s.match(/^(?<surface>[^#]+)#(?<id>\d+)$/);
+      if (mSimple?.groups) {
+        out.surfaceName = mSimple.groups.surface.trim();
+      }
+
+      // "Surface(name=Task=367)/@0x..._transition-leash#35771"
+      const mTask = s.match(/Task=(?<taskId>\d+)/);
+      if (mTask?.groups) out.taskId = mTask.groups.taskId;
+      const mSurfaceName = s.match(/Surface\(name=(?<inner>[^)]+)\)/);
+      if (mSurfaceName?.groups) out.surfaceName = mSurfaceName.groups.inner.trim();
+
+      // best-effort: if it contains a package-like token
+      const mPkg = s.match(/(?<pkg>[A-Za-z0-9_]+\.[A-Za-z0-9_.]+)/);
+      if (mPkg?.groups) out.packageName = mPkg.groups.pkg;
+
+      return out;
+    }
+
+    function renderLayerDetail(){
+      const seg = currentDisplaySegment();
+      const box = $('layerDetail');
+      const raw = $('rawSnippet');
+      raw.textContent = '';
+      if (!seg || !seg.layers || !seg.layers.length) { box.textContent = '无图层'; return; }
+      let layer = null;
+      if (state.selectedLayerRef && seg.layers.includes(state.selectedLayerRef)) {
+        layer = state.selectedLayerRef;
+      } else if (state.selectedLayerKey) {
+        layer = seg.layers.find(l => layerKey(l) === state.selectedLayerKey) || null;
+      }
+      if (!layer) {
+        box.textContent = state.selectedLayerKey ? '未选中（当前帧/Display 未找到该图层）' : '未选中';
+        return;
+      }
+      box.innerHTML = '';
+
+      const head = document.createElement('div');
+      head.style.display = 'flex';
+      head.style.flexDirection = 'column';
+      head.style.gap = '8px';
+      head.style.marginBottom = '10px';
+
+      const title = document.createElement('div');
+      title.className = 'mono';
+      title.style.fontWeight = '800';
+      title.style.fontSize = '13px';
+      title.style.lineHeight = '1.2';
+      title.textContent = layer.name || '(unnamed)';
+
+      const app = parseLayerAppInfo(layer.name);
+      const chips = document.createElement('div');
+      chips.className = 'badges';
+      if (app.packageName) chips.appendChild(makeBadge(`pkg=${app.packageName}`, false));
+      if (app.component) chips.appendChild(makeBadge(`cmp=${app.component}`, false));
+      if (app.taskId) chips.appendChild(makeBadge(`task=${app.taskId}`, false));
+      if (layer.sfCmp) chips.appendChild(makeBadge(`sf=${layer.sfCmp}`, false));
+      if (layer.hwcCmp) chips.appendChild(makeBadge(`hwc=${layer.hwcCmp}`, false));
+      if (layer.isOplusSecure === 'true' || layer.ignoreSecure === 'true') chips.appendChild(makeBadge('secure', true));
+      chips.appendChild(makeBadge(`z=${layer.z}`, false));
+
+      head.appendChild(title);
+      if (chips.childNodes.length) head.appendChild(chips);
+      box.appendChild(head);
+
+      const kv = document.createElement('div');
+      kv.className = 'kv';
+      const fields = [
+        ['name', layer.name],
+        ['package', app.packageName || ''],
+        ['component', app.component || ''],
+        ['taskId', app.taskId || ''],
+        ['surface', app.surfaceName || ''],
+        ['seq', layer.seq],
+        ['useq', layer.useq],
+        ['z', String(layer.z)],
+        ['sfCmp', layer.sfCmp],
+        ['hwcCmp', layer.hwcCmp],
+        ['alpha', layer.alpha],
+        ['tr', layer.tr],
+        ['sc', layer.scRect ? `[${layer.scRect.l} ${layer.scRect.t} ${layer.scRect.r} ${layer.scRect.b}]` : ''],
+        ['df', layer.dfRect ? `[${layer.dfRect.l} ${layer.dfRect.t} ${layer.dfRect.r} ${layer.dfRect.b}]` : ''],
+        ['changes', layer.changes],
+        ['ignoreSecure', layer.ignoreSecure],
+        ['isOplusSecure', layer.isOplusSecure],
+        ['isOpaque', layer.isOpaque],
+      ];
+      for (const [k,v] of fields) {
+        if (v == null || v === '') continue;
+        const kEl = document.createElement('div'); kEl.textContent = k;
+        const vEl = document.createElement('div'); vEl.textContent = String(v);
+        kv.appendChild(kEl); kv.appendChild(vEl);
+      }
+      box.appendChild(kv);
+      raw.textContent = (layer.rawNameLine ? layer.rawNameLine + '\n' : '') + (layer.rawPropLine || '');
+      renderAndroidMatch();
+    }
+
+    function renderTimeline(){
+      const range = $('frameRange');
+      const meta = $('frameMeta');
+      const time = $('frameTime');
+      const total = state.frames.length;
+      range.max = String(Math.max(0, total - 1));
+      range.value = String(clamp(state.frameIdx, 0, Math.max(0, total - 1)));
+      meta.textContent = total ? `Frame: ${state.frameIdx + 1}/${total}` : 'Frame: -/-';
+      const f = currentFrame();
+      time.textContent = `time: ${f ? (f.timeStr || '-') : '-'}`;
+    }
+
+    function setVideoUIVisible(visible){
+      const sec = $('videoSection');
+      if (!sec) return;
+      // video area is always visible now; this is kept for compatibility
+      sec.classList.toggle('hidden', false);
+      const v = $('video');
+      const ph = $('videoPlaceholder');
+      if (v) v.classList.toggle('hidden', !visible);
+      if (ph) ph.classList.toggle('hidden', visible);
+    }
+
+
+    function setVideoMeta(text){
+      const el = $('videoMeta');
+      if (el) el.textContent = text || '';
+    }
+
+    function setVideoWarn(text){
+      const el = $('videoWarn');
+      if (el) el.textContent = text || '';
+    }
+
+    function syncVideoToCurrentFrame(force){
+      const v = $('video');
+      if (!v) return false;
+      if (!state.video || !state.video.url || state.video.startEpochMs == null || state.video.durationSec == null) {
+        setVideoWarn('');
+        setVideoMeta(`video: ${state.video?.file?.name || '-'}${state.video?.startEpochMs ? ` | start=${new Date(state.video.startEpochMs).toLocaleString()}` : ''}`);
+        const ph = $('videoPlaceholder');
+        if (ph) ph.textContent = '未上传录屏（或仍在加载元数据）。\n只展示图层信息。';
+        setVideoUIVisible(false);
+        return false;
+      }
+      const f = currentFrame();
+      if (!f || !f.timeStr) {
+        setVideoWarn('');
+        const ph = $('videoPlaceholder');
+        if (ph) ph.textContent = '未加载日志帧。\n只展示图层信息。';
+        setVideoUIVisible(false);
+        return false;
+      }
+      const year = new Date(state.video.startEpochMs).getFullYear();
+      const frameEpoch = parseLogTsToEpoch(f.timeStr, year);
+      if (frameEpoch == null) {
+        setVideoUIVisible(false);
+        return false;
+      }
+      const offsetMs = Number(state.video.offsetMs || 0);
+      const tSec = (frameEpoch - state.video.startEpochMs + offsetMs) / 1000;
+      const inRange = tSec >= 0 && tSec <= state.video.durationSec;
+      if (!inRange) {
+        state.video.aligned = false;
+        setVideoWarn('未对齐：当前帧不在视频时间范围内（默认只展示图层）');
+        setVideoMeta(`video: ${state.video.file?.name || '-'} | start=${new Date(state.video.startEpochMs).toLocaleString()}`);
+        const ph = $('videoPlaceholder');
+        if (ph) ph.textContent = '当前帧时间不在该录屏覆盖范围内。\n只展示图层信息。';
+        setVideoUIVisible(false);
+        return false;
+      }
+
+      // If user manually scrubbed video, only force sync when requested.
+      if (!force && state.video.aligned === false) {
+        setVideoWarn('未对齐：请点击“对齐视频到当前帧”（默认只展示图层）');
+        setVideoMeta(`video: ${state.video.file?.name || '-'} | start=${new Date(state.video.startEpochMs).toLocaleString()}`);
+        const ph = $('videoPlaceholder');
+        if (ph) ph.textContent = '已上传录屏，但当前尚未对齐到此帧。\n点击“对齐视频到当前帧”后显示画面。';
+        setVideoUIVisible(false);
+        return false;
+      }
+
+      try {
+        v.currentTime = Math.max(0, Math.min(Number(tSec), Number(v.duration || state.video.durationSec)));
+      } catch (_) {}
+      state.video.aligned = true;
+      // Prevent immediate "timeupdate" jitter right after a programmatic seek from marking it as unaligned.
+      state.video.ignoreMismatchUntil = (performance?.now ? performance.now() : Date.now()) + 800;
+      state.video.mismatchStreak = 0;
+      setVideoWarn('');
+      setVideoMeta(`video: ${state.video.file?.name || '-'} | frame=${f.timeStr} | t=${tSec.toFixed(3)}s | offset=${offsetMs}ms`);
+      setVideoUIVisible(true);
+      return true;
+    }
+
+    // ---------- 3D View ----------
+    const view3d = {
+      rotX: 58,
+      rotY: -22,
+      zoom: 1.0,
+      dragging: false,
+      lastX: 0,
+      lastY: 0,
+    };
+
+    function setView3dOverlay(text){
+      $('view3dOverlay').textContent = text || '';
+    }
+
+    function clearScene(){
+      const scene = $('scene');
+      scene.innerHTML = '';
+    }
+
+    function apply3DTransform(){
+      const scene = $('scene');
+      if (!scene) return;
+      scene.style.transform =
+        `translate3d(-50%, -50%, 0px) rotateX(${view3d.rotX}deg) rotateY(${view3d.rotY}deg) scale(${view3d.zoom})`;
+    }
+
+    function selectLayerByKey(key){
+      const seg = currentDisplaySegment();
+      if (!seg || !seg.layers || !seg.layers.length) return false;
+      const layer = seg.layers.find(l => layerKey(l) === key) || null;
+      if (!layer) return false;
+      state.selectedLayerKey = key;
+      state.selectedLayerRef = layer;
+      renderLayerDetail();
+      renderLayerList();
+      render3D();
+      return true;
+    }
+
+    function render3D(){
+      const wrap = $('view3d');
+      const scene = $('scene');
+      const seg = currentDisplaySegment();
+      const f = currentFrame();
+      if (!seg || !f) {
+        setView3dOverlay('未加载');
+        clearScene();
+        return;
+      }
+
+      const mode = $('coordMode').value;
+      const depth = Number($('depthRange')?.value || '12');
+      $('depthValue').textContent = String(depth);
+      const labelMode = $('labelMode')?.value || 'auto';
+
+      const rects = seg.layers
+        .map(l => ({ layer: l, rect: mode === 'sc' ? l.scRect : l.dfRect }))
+        .filter(x => x.rect);
+
+      setView3dOverlay(`Frame ${state.frameIdx + 1}/${state.frames.length} | Display ${seg.displayId} (${seg.displayDesc}) | layers=${seg.layers.length} | coord=${mode}`);
+      clearScene();
+      if (!rects.length) return;
+
+      // camera-ish transform
+      apply3DTransform();
+
+      // bounds
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const { rect } of rects) {
+        minX = Math.min(minX, rect.l);
+        minY = Math.min(minY, rect.t);
+        maxX = Math.max(maxX, rect.r);
+        maxY = Math.max(maxY, rect.b);
+      }
+      const bw = Math.max(1, maxX - minX);
+      const bh = Math.max(1, maxY - minY);
+
+      const w = wrap.clientWidth;
+      const h = wrap.clientHeight;
+      const pad = 60;
+      const scale = Math.min((w - pad * 2) / bw, (h - pad * 2) / bh);
+      const bwScaled = bw * scale;
+      const bhScaled = bh * scale;
+
+      // grid plane (behind)
+      const gridW = Math.max(240, Math.floor(bwScaled + 120));
+      const gridH = Math.max(240, Math.floor(bhScaled + 120));
+      const grid = document.createElement('div');
+      grid.className = 'gridPlane';
+      grid.style.width = gridW + 'px';
+      grid.style.height = gridH + 'px';
+      grid.style.transform = `translate3d(${-gridW/2}px, ${-gridH/2}px, -${Math.max(20, depth)}px)`;
+      scene.appendChild(grid);
+
+      // order by z asc (back) -> z desc (front)
+      const ordered = rects.slice().sort((a,b) => (Number(a.layer.z) - Number(b.layer.z)));
+      for (let i = 0; i < ordered.length; i++) {
+        const { layer, rect } = ordered[i];
+        const key = layerKey(layer);
+        const isSel = (state.selectedLayerKey === key);
+        const isHover = (state.hoveredLayerKey === key);
+
+        const x = (rect.l - minX) * scale;
+        const y = (rect.t - minY) * scale;
+        const lw = Math.max(1, (rect.r - rect.l) * scale);
+        const lh = Math.max(1, (rect.b - rect.t) * scale);
+        const cx = (x + lw / 2) - bwScaled / 2;
+        const cy = (y + lh / 2) - bhScaled / 2;
+
+        const z = i * depth;
+
+        const el = document.createElement('div');
+        el.className = 'layerPlane' + (isSel ? ' active' : '');
+        el.style.width = lw + 'px';
+        el.style.height = lh + 'px';
+        el.style.transform = `translate3d(${cx}px, ${cy}px, ${z}px) translate(-50%, -50%)`;
+        el.setAttribute('data-key', key);
+        el.title = layer.name || '';
+        el.style.pointerEvents = 'auto';
+
+        // subtle color by composition/security
+        const cmp = (layer.hwcCmp || layer.sfCmp || '').toUpperCase();
+        if (cmp.includes('DEVICE')) { el.style.borderColor = 'rgba(63,185,80,.70)'; el.style.background = 'rgba(63,185,80,.08)'; }
+        else if (cmp.includes('CLIENT')) { el.style.borderColor = 'rgba(124,201,255,.65)'; el.style.background = 'rgba(124,201,255,.08)'; }
+        if (layer.isOplusSecure === 'true' || layer.ignoreSecure === 'true') { el.style.borderColor = 'rgba(255,123,114,.75)'; el.style.background = 'rgba(255,123,114,.08)'; }
+        if (isHover) { el.style.borderColor = 'rgba(124,201,255,.95)'; el.style.background = 'rgba(124,201,255,.12)'; }
+        if (isSel) { el.style.borderColor = 'rgba(255,209,102,.95)'; el.style.background = 'rgba(255,209,102,.13)'; }
+
+        const showLabel =
+          labelMode === 'all' ? true :
+          labelMode === 'none' ? false :
+          (isSel || isHover);
+        if (showLabel) {
+          const lb = document.createElement('div');
+          lb.className = 'layerLabel';
+          lb.textContent = layer.name || '(unnamed)';
+          el.appendChild(lb);
+        }
+
+        // NOTE: click/hover handled by event delegation on #scene for stability (DOM is rebuilt on many actions)
+
+        scene.appendChild(el);
+      }
+
+      // Presentation labels (bottom centered)
+      renderPresentLabels(ordered, seg);
+    }
+
+    function renderPresentLabels(ordered, seg){
+      const box = $('presentLabels');
+      const foot = $('presentFooter');
+      if (!box) return;
+      const isPresent = document.body.classList.contains('present');
+      box.classList.toggle('hidden', !isPresent);
+      if (!isPresent) {
+        box.innerHTML = '';
+        if (foot) foot.textContent = '';
+        return;
+      }
+      // show top-most first
+      const list = ordered.slice().sort((a,b) => (Number(b.layer.z) - Number(a.layer.z)));
+      box.innerHTML = '';
+      const frag = document.createDocumentFragment();
+      for (const { layer } of list) {
+        const key = layerKey(layer);
+        const div = document.createElement('div');
+        div.className = 'presentLabelItem' + (state.selectedLayerKey === key ? ' active' : '');
+        div.textContent = layer.name || '(unnamed)';
+        div.title = layer.name || '';
+        div.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          state.selectedLayerKey = key;
+          state.selectedLayerRef = layer;
+          renderLayerDetail();
+          renderLayerList();
+          render3D();
+        });
+        frag.appendChild(div);
+      }
+      box.appendChild(frag);
+      if (foot) {
+        const d = seg ? `${seg.displayId} ${seg.displayDesc || ''}`.trim() : '';
+        foot.textContent = d ? `Display: ${d}` : '';
+      }
+    }
+
+    function renderAll(){
+      renderTimeline();
+      renderDisplaySelect();
+      renderLayerList();
+      renderLayerDetail();
+      render3D();
+      // Only show video when its absolute time matches current frame time (i.e., frame is within video range and aligned).
+      syncVideoToCurrentFrame(false);
+      renderAndroidMatch();
+    }
+
+    // ---------- Load / Clear ----------
+    function resetSfState(){
+      // stop playback and drop sf-only state, but keep android log + video
+      stopPlaying();
+      state.text = '';
+      state.segments = [];
+      state.frames = [];
+      state.frameIdx = 0;
+      state.displayId = null;
+      state.selectedLayerKey = null;
+      state.selectedLayerRef = null;
+      state.hoveredLayerKey = null;
+      setError('');
+      $('layerFilter').value = '';
+      $('displaySelect').innerHTML = '';
+      $('layerList').innerHTML = '';
+      $('layerDetail').textContent = '未选中';
+      $('rawSnippet').textContent = '';
+      $('view3dOverlay').textContent = '未加载';
+      $('frameRange').min = '0'; $('frameRange').max = '0'; $('frameRange').value = '0';
+      render3D();
+      renderTimeline();
+      renderAndroidMatch();
+    }
+
+    function clearAll(){
+      // cleanup video URL
+      try {
+        if (state?.video?.url) URL.revokeObjectURL(state.video.url);
+      } catch (_) {}
+
+      // reset file inputs so user can re-upload (including selecting the same file name again)
+      try { const lf = $('logFile'); if (lf) lf.value = ''; } catch (_) {}
+      try { const vf = $('videoFile'); if (vf) vf.value = ''; } catch (_) {}
+      try { const af = $('androidLogFile'); if (af) af.value = ''; } catch (_) {}
+      try { const pm = $('presentMode'); if (pm) pm.checked = false; } catch (_) {}
+      document.body.classList.remove('present');
+
+      state = {
+        text:'',
+        segments:[],
+        frames:[],
+        frameIdx:0,
+        displayId:null,
+        selectedLayerKey:null,
+        selectedLayerRef:null,
+        hoveredLayerKey:null,
+        android: { file:null, text:'', parsed:false, eventCount:0, index:new Map() },
+        video:{ file:null, url:null, startEpochMs:null, durationSec:null, aligned:false, offsetMs:0 },
+        playing:false,
+        playTimer:null
+      };
+      setError('');
+      setStats('已清空');
+      $('layerFilter').value = '';
+      $('displaySelect').innerHTML = '';
+      $('layerList').innerHTML = '';
+      $('layerDetail').textContent = '未选中';
+      $('rawSnippet').textContent = '';
+      $('view3dOverlay').textContent = '未加载';
+      $('frameRange').min = '0'; $('frameRange').max = '0'; $('frameRange').value = '0';
+      stopPlaying();
+      render3D();
+      renderTimeline();
+      $('androidMatchMeta').textContent = '未上传常规日志';
+      $('androidMatchList').textContent = '-';
+
+      // reset video UI
+      try {
+        const v = $('video');
+        if (v) {
+          v.pause();
+          v.onloadedmetadata = null;
+          v.ontimeupdate = null;
+          v.removeAttribute('src');
+          v.load();
+        }
+      } catch (_) {}
+      setVideoWarn('');
+      setVideoMeta('video: -');
+      const ph = $('videoPlaceholder');
+      if (ph) ph.textContent = '未上传录屏（或未对齐）。\n只展示图层信息。';
+      setVideoUIVisible(false);
+      try { $('videoOffsetMs').value = '0'; } catch (_) {}
+      try { $('labelMode').value = 'auto'; } catch (_) {}
+    }
+
+    async function readFileAsText(file){
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(reader.error || new Error('读取失败'));
+        reader.onabort = () => reject(new Error('读取中断'));
+        reader.onload = () => resolve(String(reader.result || ''));
+        reader.readAsText(file, 'utf-8');
+      });
+    }
+
+    async function loadText(text){
+      resetSfState();
+      state.text = text || '';
+      if (!state.text.trim()) { setError('文件为空'); return; }
+      setStats('解析中...');
+      const segs = parseSegmentsFromText(state.text);
+      const win = Number($('groupWindow').value || '5');
+      const frames = groupSegmentsToFrames(segs, Number.isFinite(win) ? win : 5);
+      state.segments = segs;
+      state.frames = frames;
+      state.frameIdx = 0;
+      setStats(`解析完成：segments=${segs.length}，frames≈${frames.length}（合帧窗口=${win}ms）`);
+      renderAll();
+    }
+
+    // ---------- Playback ----------
+    function startPlaying(){
+      if (state.playing) return;
+      state.playing = true;
+      $('playBtn').disabled = true;
+      $('stopBtn').disabled = false;
+      const tick = () => {
+        if (!state.playing) return;
+        const speed = Number($('speedSelect').value || '1');
+        const stepEveryMs = Math.max(16, Math.floor(220 / Math.max(1, speed)));
+        state.playTimer = setTimeout(() => {
+          const total = state.frames.length;
+          if (!total) { stopPlaying(); return; }
+          if (state.frameIdx >= total - 1) { stopPlaying(); return; }
+          state.frameIdx++;
+          // keep selection but clear hover
+          state.hoveredLayerKey = null;
+          renderAll();
+          tick();
+        }, stepEveryMs);
+      };
+      tick();
+    }
+
+    function stopPlaying(){
+      state.playing = false;
+      $('playBtn').disabled = false;
+      $('stopBtn').disabled = true;
+      if (state.playTimer) { clearTimeout(state.playTimer); state.playTimer = null; }
+    }
+
+    // ---------- Events ----------
+    // Note: file upload inputs were intentionally removed from the UI.
+    // Keep the handlers guarded for back-compat (no-op when elements are absent).
+    const __lf = $('logFile');
+    if (__lf) __lf.addEventListener('change', async () => {
+      setError('');
+      const file = $('logFile')?.files?.[0] || null;
+      if (!file) return;
+      try {
+        const text = await readFileAsText(file);
+        await loadText(text);
+      } catch (e) {
+        setError(e?.message || String(e));
+      }
+    });
+
+    const __af = $('androidLogFile');
+    if (__af) __af.addEventListener('change', async () => {
+      setError('');
+      const input = $('androidLogFile');
+      const file = input?.files?.[0] || null;
+      if (!file) return;
+      try {
+        const text = await readFileAsText(file);
+        state.android.file = file;
+        $('androidMatchMeta').textContent = '解析常规日志中…';
+        await indexAndroidLogText(text);
+      } catch (e) {
+        setError(e?.message || String(e));
+      } finally {
+        // allow selecting same file again
+        try { if (input) input.value = ''; } catch (_) {}
+      }
+    });
+
+    const __vf = $('videoFile');
+    if (__vf) __vf.addEventListener('change', async () => {
+      setError('');
+      const input = $('videoFile');
+      const file = input?.files?.[0] || null;
+      if (!file) return;
+      // fallback for manual upload path (not used in SF_Noah integration)
+      const start = parseVideoStartFromFilename(file.name);
+      // revoke old
+      try { if (state.video?.url) URL.revokeObjectURL(state.video.url); } catch (_) {}
+      const url = URL.createObjectURL(file);
+      window.__BUGLENS_LOAD_VIDEO_URL__?.(url, file.name);
+      if (start == null) {
+        setVideoWarn('未解析起始时间：可点击“用当前画面校准”');
+      }
+      // allow selecting the same file again next time
+      try { if (input) input.value = ''; } catch (_) {}
+    });
+
+    $('clearBtn').addEventListener('click', () => clearAll());
+    $('presentMode').addEventListener('change', () => {
+      const on = $('presentMode').checked;
+      document.body.classList.toggle('present', !!on);
+      // make presentation view clean by default
+      if (on) {
+        try { $('labelMode').value = 'none'; } catch (_) {}
+      }
+      renderAll();
+    });
+    $('layerFilter').addEventListener('input', () => { renderLayerList(); render3D(); });
+    $('coordMode').addEventListener('change', () => { renderLayerList(); renderLayerDetail(); render3D(); });
+    $('evtFlags').addEventListener('change', () => { renderAndroidMatch(); });
+    $('evtAlpha').addEventListener('change', () => { renderAndroidMatch(); });
+    $('evtReparent').addEventListener('change', () => { renderAndroidMatch(); });
+    $('evtShow').addEventListener('change', () => { renderAndroidMatch(); });
+    $('evtHide').addEventListener('change', () => { renderAndroidMatch(); });
+    $('evtRelease').addEventListener('change', () => { renderAndroidMatch(); });
+    $('matchLimit').addEventListener('change', () => { renderAndroidMatch(); });
+    $('matchFilter').addEventListener('input', () => { renderAndroidMatch(); });
+    $('groupWindow').addEventListener('change', () => {
+      if (!state.text) return;
+      // regroup without reparsing segments
+      const win = Number($('groupWindow').value || '5');
+      state.frames = groupSegmentsToFrames(state.segments, Number.isFinite(win) ? win : 5);
+      state.frameIdx = clamp(state.frameIdx, 0, Math.max(0, state.frames.length - 1));
+      renderAll();
+      setStats(`已重新合帧：frames≈${state.frames.length}（合帧窗口=${win}ms）`);
+    });
+
+    $('displaySelect').addEventListener('change', () => {
+      state.displayId = $('displaySelect').value || null;
+      state.selectedLayerKey = null;
+      state.selectedLayerRef = null;
+      state.hoveredLayerKey = null;
+      renderLayerList();
+      renderLayerDetail();
+      render3D();
+    });
+
+    $('frameRange').addEventListener('input', () => {
+      const idx = Number($('frameRange').value || '0');
+      state.frameIdx = clamp(idx, 0, Math.max(0, state.frames.length - 1));
+      state.hoveredLayerKey = null;
+      // selection may not exist in the new frame/display; keep key but drop ref
+      state.selectedLayerRef = null;
+      // keep selected layer only if still exists in new frame/display
+      renderAll();
+    });
+
+    $('prevBtn').addEventListener('click', () => {
+      state.frameIdx = clamp(state.frameIdx - 1, 0, Math.max(0, state.frames.length - 1));
+      state.hoveredLayerKey = null;
+      renderAll();
+    });
+    $('nextBtn').addEventListener('click', () => {
+      state.frameIdx = clamp(state.frameIdx + 1, 0, Math.max(0, state.frames.length - 1));
+      state.hoveredLayerKey = null;
+      renderAll();
+    });
+
+    $('playBtn').addEventListener('click', () => startPlaying());
+    $('stopBtn').addEventListener('click', () => stopPlaying());
+
+    // 3D controls
+    $('depthRange').addEventListener('input', () => { render3D(); });
+    $('labelMode').addEventListener('change', () => { render3D(); });
+    $('resetViewBtn').addEventListener('click', () => {
+      view3d.rotX = 58; view3d.rotY = -22; view3d.zoom = 1.0;
+      render3D();
+    });
+
+    $('syncVideoBtn').addEventListener('click', () => {
+      // only when both log + video exist and frame is in range will it show
+      if (!state.video || !state.video.url) {
+        setError('请先上传录屏（mp4）');
+        return;
+      }
+      syncVideoToCurrentFrame(true);
+    });
+
+    $('videoOffsetMs').addEventListener('change', () => {
+      const n = Number($('videoOffsetMs').value || '0');
+      state.video.offsetMs = Number.isFinite(n) ? n : 0;
+      // changing offset means user intends to realign
+      state.video.aligned = true;
+      syncVideoToCurrentFrame(true);
+    });
+
+    $('calibrateBtn').addEventListener('click', () => {
+      try {
+        setError('');
+        setStats('校准中...');
+        const v = $('video');
+        const f = currentFrame();
+
+        const missing = [];
+        if (!state.video || !state.video.url) missing.push('未上传录屏');
+        if (!state.video || state.video.startEpochMs == null) missing.push('未解析录屏开始时间（检查文件名格式）');
+        if (!state.video || state.video.durationSec == null) missing.push('视频元数据未加载完成（等待时长出现）');
+        if (!v) missing.push('视频组件不存在');
+        if (!f || !f.timeStr) missing.push('未加载日志帧（先上传日志并切到某一帧）');
+
+        if (missing.length) {
+          const msg = `无法校准：${missing.join('；')}`;
+          setError(msg);
+          setStats('校准失败');
+          const ph = $('videoPlaceholder');
+          if (ph) ph.textContent = msg + '\n只展示图层信息。';
+          return;
+        }
+
+        const year = new Date(state.video.startEpochMs).getFullYear();
+        const frameEpoch = parseLogTsToEpoch(f.timeStr, year);
+        if (frameEpoch == null) {
+          setError('校准失败：当前帧时间解析失败');
+          setStats('校准失败');
+          return;
+        }
+
+        // You drag the video to the "matching" moment; we compute offset so that:
+        // startEpoch + videoCurrentTime ≈ frameEpoch + offsetMs
+        const absVideo = state.video.startEpochMs + (v.currentTime * 1000);
+        const offsetMs = Math.round(absVideo - frameEpoch);
+
+        state.video.offsetMs = offsetMs;
+        try { $('videoOffsetMs').value = String(offsetMs); } catch (_) {}
+        state.video.aligned = true;
+
+        syncVideoToCurrentFrame(true);
+        setStats(`已校准视频偏移：${offsetMs}ms（按当前画面）`);
+      } catch (e) {
+        setError(`校准异常：${e?.message || String(e)}`);
+        setStats('校准失败');
+      }
+    });
+
+    // Drag rotate & wheel zoom
+    (function init3dInteractions(){
+      const el = $('view3d');
+      const scene = $('scene');
+
+      // Event delegation: stable click handling even if layer planes are rebuilt
+      scene.addEventListener('click', (e) => {
+        const plane = e.target && e.target.closest ? e.target.closest('.layerPlane') : null;
+        if (!plane) {
+          // tiny debug hint in overlay so we can tell clicks are arriving
+          try {
+            const t = e.target;
+            const hint = t ? (t.id ? `#${t.id}` : (t.className ? `.${String(t.className).split(' ')[0]}` : t.tagName)) : '(null)';
+            setView3dOverlay(`(未命中图层) ${hint} | Frame ${state.frameIdx + 1}/${state.frames.length}`);
+          } catch (_) {}
+          return;
+        }
+        const key = plane.getAttribute('data-key') || '';
+        if (key) selectLayerByKey(key);
+      }, true);
+
+      // Hover delegation: highlight on mouse move
+      scene.addEventListener('mousemove', (e) => {
+        const plane = e.target && e.target.closest ? e.target.closest('.layerPlane') : null;
+        const key = plane ? (plane.getAttribute('data-key') || null) : null;
+        if (key !== state.hoveredLayerKey) {
+          state.hoveredLayerKey = key;
+          renderLayerList();
+          render3D();
+        }
+      });
+      scene.addEventListener('mouseleave', () => {
+        if (state.hoveredLayerKey != null) {
+          state.hoveredLayerKey = null;
+          renderLayerList();
+          render3D();
+        }
+      });
+
+      el.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return;
+        // If user is clicking a layer, don't start dragging (otherwise tiny mouse moves will rebuild & swallow click).
+        if (e.target && e.target.closest && e.target.closest('.layerPlane')) return;
+        view3d.dragging = true;
+        view3d.lastX = e.clientX;
+        view3d.lastY = e.clientY;
+      });
+      window.addEventListener('mousemove', (e) => {
+        if (!view3d.dragging) return;
+        const dx = e.clientX - view3d.lastX;
+        const dy = e.clientY - view3d.lastY;
+        view3d.lastX = e.clientX;
+        view3d.lastY = e.clientY;
+        view3d.rotY += dx * 0.35;
+        view3d.rotX -= dy * 0.35;
+        view3d.rotX = clamp(view3d.rotX, -85, 85);
+        // Only update camera transform during drag; do NOT rebuild DOM (otherwise click events get lost).
+        apply3DTransform();
+      });
+      window.addEventListener('mouseup', () => { view3d.dragging = false; });
+
+      el.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const delta = Math.sign(e.deltaY);
+        const next = view3d.zoom * (delta > 0 ? 0.92 : 1.08);
+        view3d.zoom = clamp(next, 0.45, 2.4);
+        apply3DTransform();
+      }, { passive: false });
+
+      // touch
+      el.addEventListener('touchstart', (e) => {
+        if (!e.touches || e.touches.length !== 1) return;
+        // Ignore when starting on a layer; allow tap to click-select.
+        const tgt = e.target;
+        if (tgt && tgt.closest && tgt.closest('.layerPlane')) return;
+        const t = e.touches[0];
+        view3d.dragging = true;
+        view3d.lastX = t.clientX;
+        view3d.lastY = t.clientY;
+      }, { passive: true });
+      el.addEventListener('touchmove', (e) => {
+        if (!view3d.dragging || !e.touches || e.touches.length !== 1) return;
+        const t = e.touches[0];
+        const dx = t.clientX - view3d.lastX;
+        const dy = t.clientY - view3d.lastY;
+        view3d.lastX = t.clientX;
+        view3d.lastY = t.clientY;
+        view3d.rotY += dx * 0.35;
+        view3d.rotX -= dy * 0.35;
+        view3d.rotX = clamp(view3d.rotX, -85, 85);
+        apply3DTransform();
+      }, { passive: true });
+      el.addEventListener('touchend', () => { view3d.dragging = false; }, { passive: true });
+    })();
+
+    // Resize redraw
+    window.addEventListener('resize', () => render3D());
+
+    // Floating video drag
+    (function initFloatingVideo(){
+      const box = $('videoSection');
+      const head = $('videoHead') || box?.querySelector?.('.videoHead');
+      if (!box || !head) return;
+
+      const STORE_KEY = 'sf_viewer_video_float_pos_v1';
+      const defaultPos = { top: 14, right: 14, left: null };
+
+      function clamp(n, a, b){ return Math.max(a, Math.min(b, n)); }
+      function applyPos(pos){
+        // pos: {left, top} in px
+        if (pos && Number.isFinite(pos.left) && Number.isFinite(pos.top)) {
+          box.style.left = `${Math.round(pos.left)}px`;
+          box.style.top = `${Math.round(pos.top)}px`;
+          box.style.right = 'auto';
+        } else {
+          box.style.left = '';
+          box.style.top = `${defaultPos.top}px`;
+          box.style.right = `${defaultPos.right}px`;
+        }
+      }
+      function loadPos(){
+        try {
+          const raw = localStorage.getItem(STORE_KEY);
+          if (!raw) return null;
+          const obj = JSON.parse(raw);
+          const left = Number(obj?.left);
+          const top = Number(obj?.top);
+          if (!Number.isFinite(left) || !Number.isFinite(top)) return null;
+          return { left, top };
+        } catch (_) { return null; }
+      }
+      function savePos(pos){
+        try { localStorage.setItem(STORE_KEY, JSON.stringify(pos)); } catch (_) {}
+      }
+      function resetPos(){
+        try { localStorage.removeItem(STORE_KEY); } catch (_) {}
+        applyPos(null);
+      }
+
+      // restore
+      applyPos(loadPos());
+
+      let dragging = false;
+      let startX = 0, startY = 0;
+      let startLeft = 0, startTop = 0;
+
+      function onDown(clientX, clientY){
+        dragging = true;
+        const r = box.getBoundingClientRect();
+        startX = clientX;
+        startY = clientY;
+        startLeft = r.left;
+        startTop = r.top;
+      }
+      function onMove(clientX, clientY){
+        if (!dragging) return;
+        const dx = clientX - startX;
+        const dy = clientY - startY;
+        const nextLeft = startLeft + dx;
+        const nextTop = startTop + dy;
+        const vw = window.innerWidth || document.documentElement.clientWidth || 0;
+        const vh = window.innerHeight || document.documentElement.clientHeight || 0;
+        const r = box.getBoundingClientRect();
+        const maxLeft = Math.max(0, vw - r.width - 6);
+        const maxTop = Math.max(0, vh - r.height - 6);
+        const left = clamp(nextLeft, 6, maxLeft);
+        const top = clamp(nextTop, 6, maxTop);
+        applyPos({ left, top });
+        savePos({ left, top });
+      }
+      function onUp(){ dragging = false; }
+
+      head.addEventListener('dblclick', (e) => { e.preventDefault(); resetPos(); });
+
+      head.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return;
+        // allow text selection on meta/warn? we choose drag always on header
+        e.preventDefault();
+        onDown(e.clientX, e.clientY);
+      });
+      window.addEventListener('mousemove', (e) => onMove(e.clientX, e.clientY));
+      window.addEventListener('mouseup', () => onUp());
+
+      head.addEventListener('touchstart', (e) => {
+        if (!e.touches || e.touches.length !== 1) return;
+        const t = e.touches[0];
+        onDown(t.clientX, t.clientY);
+      }, { passive: true });
+      window.addEventListener('touchmove', (e) => {
+        if (!dragging || !e.touches || e.touches.length !== 1) return;
+        const t = e.touches[0];
+        onMove(t.clientX, t.clientY);
+      }, { passive: true });
+      window.addEventListener('touchend', () => onUp(), { passive: true });
+    })();
+
+    // -------- SF_Noah (C#) integration: load video by URL into floating window --------
+    // C# calls this with a file:/// URL, and we load it into the floating video window (#video).
+    // Filename is optional (used for metadata display and best-effort start-time parsing).
+    window.__BUGLENS_LOAD_VIDEO_URL__ = function(url, name){
+      try {
+        setError('');
+        const v = $('video');
+        if (!v) return;
+        const box = $('videoSection');
+        const head = $('videoHead');
+
+        // Revoke old object URL (if any)
+        try { if (state.video?.url && String(state.video.url).startsWith('blob:')) URL.revokeObjectURL(state.video.url); } catch (_) {}
+
+        state.video = state.video || {};
+        state.video.file = { name: name || (url ? String(url).split('/').pop() : '-') };
+        state.video.url = url;
+        state.video.startEpochMs = parseVideoStartFromFilename(state.video.file.name);
+        state.video.durationSec = null;
+        state.video.aligned = false;
+        state.video.offsetMs = Number($('videoOffsetMs')?.value || '0') || 0;
+
+        v.src = url;
+        v.load();
+
+        setVideoMeta(`video: ${state.video.file.name}${state.video.startEpochMs ? ` | start=${new Date(state.video.startEpochMs).toLocaleString()}` : ''} | loading...`);
+        setVideoWarn(state.video.startEpochMs ? '未对齐：请点击“对齐视频到当前帧”' : '未解析起始时间：可点击“用当前画面校准”');
+        const ph = $('videoPlaceholder');
+        if (ph) ph.textContent = '已加载录屏，等待元数据加载…\n加载完成后可对齐/校准。';
+        setVideoUIVisible(false);
+
+        function fitFloatingWindow(){
+          try {
+            if (!box || !head) return;
+            const vw = Number(v.videoWidth || 0);
+            const vh = Number(v.videoHeight || 0);
+            if (!(vw > 0 && vh > 0)) return;
+
+            // Max size within viewport (keep some margin)
+            const maxW = Math.max(260, Math.floor(window.innerWidth * 0.90));
+            const maxH = Math.max(220, Math.floor(window.innerHeight * 0.85));
+            const headH = Math.ceil(head.getBoundingClientRect().height || 0);
+
+            // Fit by aspect ratio (video is object-fit:contain)
+            const availW = maxW;
+            const availH = Math.max(160, maxH - headH);
+            let targetW = availW;
+            let targetH = Math.floor(targetW * (vh / vw));
+            if (targetH > availH) {
+              targetH = availH;
+              targetW = Math.floor(targetH * (vw / vh));
+            }
+            // Keep some minimum so UI is usable
+            targetW = Math.max(260, targetW);
+            const boxH = Math.max(220, targetH + headH);
+
+            box.style.width = `${targetW}px`;
+            box.style.maxWidth = `calc(100vw - 28px)`;
+            box.style.height = `${boxH}px`;
+            box.style.maxHeight = `calc(100vh - 28px)`;
+          } catch (_) {}
+        }
+
+        v.onloadedmetadata = () => {
+          state.video.durationSec = Number(v.duration || 0);
+          setVideoMeta(`video: ${state.video.file.name}${state.video.startEpochMs ? ` | start=${new Date(state.video.startEpochMs).toLocaleString()}` : ''} | dur=${state.video.durationSec.toFixed(3)}s`);
+          // Fit floating window to native video size after metadata is available
+          try { requestAnimationFrame(fitFloatingWindow); } catch (_) { fitFloatingWindow(); }
+          syncVideoToCurrentFrame(false);
+        };
+      } catch (e) {
+        setError(e?.message || String(e));
+      }
+    };
+
+    // init
+    clearAll();
+  </script>
+</body>
+</html>
+
+

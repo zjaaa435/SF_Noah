@@ -1,0 +1,122 @@
+{
+  "schema_version": "1.0",
+  "skill_id": "{{SKILL_ID}}",
+  "name": "{{SKILL_NAME}}",
+  "created_at": "{{CREATED_AT}}",
+  "tags": ["bug", "defect", "triage", "root-cause-analysis"],
+  "description": "用于分析缺陷/异常问题的标准化工作流：从复现、日志证据、根因假设到修复方案与回归验证。",
+  "inputs": {
+    "required": [
+      {
+        "key": "symptom",
+        "type": "string",
+        "description": "现象描述（用户可见/指标/崩溃/卡顿/耗电等）。"
+      }
+    ],
+    "optional": [
+      {
+        "key": "repro_steps",
+        "type": "string",
+        "description": "复现步骤（尽量可执行、可重复）。"
+      },
+      {
+        "key": "expected_vs_actual",
+        "type": "string",
+        "description": "期望 vs 实际结果（包括截图/视频/指标）。"
+      },
+      {
+        "key": "environment",
+        "type": "string",
+        "description": "环境信息：设备/OS/版本/分支/commit/配置/网络/账号等。"
+      },
+      {
+        "key": "logs",
+        "type": "string",
+        "description": "相关日志/trace/截图/性能数据（可粘贴或给路径）。"
+      },
+      {
+        "key": "suspected_area",
+        "type": "string",
+        "description": "怀疑模块/目录/责任人（不确定也可以空）。"
+      }
+    ]
+  },
+  "workflow": [
+    {
+      "step": "Scope & Repro",
+      "instructions": [
+        "把问题归类：Crash/ANR/卡顿(Jank)/功能错误/资源异常(内存/句柄/FD)/耗电/兼容性。",
+        "判断是否可复现：频率、触发条件、是否和版本/设备/配置相关。",
+        "如果缺少复现信息，先提出 3-5 个最关键的澄清问题（不要一次问太多）。"
+      ],
+      "deliverables": ["repro_assessment", "clarifying_questions"]
+    },
+    {
+      "step": "Evidence Extraction",
+      "instructions": [
+        "从日志/trace 中提取“时间线”：触发点 → 异常点 → 后果（崩溃堆栈/错误码/关键告警）。",
+        "标出至少 3 条可引用的证据（原始日志片段/堆栈/指标变化）并给出其含义。",
+        "如果信息不足，列出下一步最有效的采集手段（例如打开某些 tag/trace、复现脚本、额外 dump）。"
+      ],
+      "deliverables": ["timeline", "evidence_list", "next_data_to_collect"]
+    },
+    {
+      "step": "Hypotheses & Narrowing",
+      "instructions": [
+        "基于证据提出 2-4 个根因假设（互相可区分，且每个都能被验证/证伪）。",
+        "对每个假设给出：支持证据、反证点、最小验证实验。",
+        "优先选择能最快缩小范围的实验（例如开关某配置、二分 commit、替换输入）。"
+      ],
+      "deliverables": ["hypotheses", "validation_plan"]
+    },
+    {
+      "step": "Fix Proposal",
+      "instructions": [
+        "给出建议修复方向：代码修改点（文件/函数/模块级别）、风险评估、兼容性影响。",
+        "提出回归测试清单：功能、性能、稳定性、边界条件。",
+        "若是 Android/framework 类问题，建议包含：单元测试/集成测试思路 + 手工验证路径 + 相关 owner。"
+      ],
+      "deliverables": ["fix_options", "risk_assessment", "regression_checklist"]
+    },
+    {
+      "step": "Output Packaging",
+      "instructions": [
+        "用统一格式输出：结论摘要、复现与影响范围、证据、根因、修复与验证。",
+        "把所有不确定点明确标注为“待确认”，避免过度推断。"
+      ],
+      "deliverables": ["final_report"]
+    }
+  ],
+  "output_format": {
+    "final_report_template": [
+      "【结论】一句话概括根因/最可能方向（若未确定，写最强假设+置信度）。",
+      "【影响范围】版本/设备/场景/频率；严重等级；是否有规避方案。",
+      "【复现】步骤、前置条件、最小复现用例。",
+      "【证据】时间线 + 关键日志/堆栈/指标（至少 3 条）。",
+      "【根因分析】假设 -> 证据 -> 排除过程 -> 最终判断。",
+      "【修复方案】改动点、原理、风险、兼容性、回滚策略。",
+      "【验证计划】回归清单 + 自动化/手工 + 指标与通过标准。",
+      "【待确认】缺口信息与采集建议。"
+    ]
+  },
+  "quality_gates": [
+    "至少包含 1 个可执行的复现/验证步骤（若无法复现，说明原因与替代策略）。",
+    "至少引用 3 条证据（日志/堆栈/trace/指标），并解释其含义。",
+    "至少提出 2 个可证伪的假设，并给出验证计划。",
+    "输出必须区分“事实/证据”与“推断/假设”。"
+  ],
+  "notes": {
+    "repo_root_hint": "{{REPO_ROOT}}",
+    "language": "zh-CN"
+  }
+}
+
+
+
+
+
+
+
+
+
+
