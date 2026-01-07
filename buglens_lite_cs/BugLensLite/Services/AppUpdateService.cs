@@ -151,13 +151,14 @@ public sealed class AppUpdateService
         if (!ghResp.IsSuccessStatusCode)
         {
             // GitHub API returns 404 when the repo has no releases yet (normal behavior).
+            // For end-users, treat it as "no update available" instead of showing maintainer instructions.
             if ((int)ghResp.StatusCode == 404)
-                throw new Exception($"更新源暂无 Release：{repo}\n\n请先在 GitHub 创建一个 Release（tag 类似 v1.2.3），并上传发布资产 zip（SF_Noah-win-x64*.zip）。");
+                return null;
             if ((int)ghResp.StatusCode == 403)
-                throw new Exception($"GitHub API 请求被拒绝（可能触发限流或无权限访问该仓库）：{repo}\n\nHTTP 403: {ghText}");
+                throw new Exception($"检查更新失败：更新源拒绝访问（HTTP 403）");
             if ((int)ghResp.StatusCode == 401)
-                throw new Exception($"GitHub API 未授权访问该仓库：{repo}\n\nHTTP 401: {ghText}");
-            throw new Exception($"GitHub 更新源请求失败：{repo}\n\nHTTP {(int)ghResp.StatusCode}: {ghText}");
+                throw new Exception($"检查更新失败：更新源未授权（HTTP 401）");
+            throw new Exception($"检查更新失败：更新源不可用（HTTP {(int)ghResp.StatusCode}）");
         }
 
         using var doc = JsonDocument.Parse(ghText);

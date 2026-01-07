@@ -1283,11 +1283,11 @@ public sealed class MainForm : Form
             if (latest == null)
             {
                 MessageBox.Show(this,
-                    "未配置更新源。\n\n默认更新源：GitHub Releases（无需配置）。\n\n如需覆盖默认更新源：\n- 方式A（GitHub）：设置环境变量 SF_NOAH_GITHUB_REPO=owner/repo\n  例如：setx SF_NOAH_GITHUB_REPO \"yourOrg/SF_Noah\"\n\n- 方式B（内网）：设置环境变量 SF_NOAH_UPDATE_FEED_URL 为 latest.json 的地址（需要 TT 登录鉴权）\n  例如：setx SF_NOAH_UPDATE_FEED_URL \"https://intranet.example.com/sf_noah/latest.json\"",
+                    "暂无可用更新。",
                     "检查更新",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
-                SetStatus("未配置更新源");
+                SetStatus("暂无可用更新");
                 return;
             }
 
